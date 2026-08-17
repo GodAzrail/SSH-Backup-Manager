@@ -1,12 +1,132 @@
 import os
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLayout, QFrame,
-                             QScrollArea, QLabel, QPushButton, QMessageBox, QHBoxLayout, QGraphicsDropShadowEffect, QProgressBar)
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLayout, QFrame, QDialog,
+                             QScrollArea, QLabel, QPushButton, QHBoxLayout, QGraphicsDropShadowEffect, QProgressBar)
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize
+
+from gui.toast import Toast
 from database.db_manager import DBManager
 from core.backup_manager import RestoreThread
 
 # ==========================================
-# РЕЗИНОВАЯ СЕТКА (Авто-перенос элементов)
+# КАСТОМНОЕ ДИАЛОГОВОЕ ОКНО (Замена QMessageBox)
+# ==========================================
+class CustomConfirmDialog(QDialog):
+    def __init__(self, parent, title, message, confirm_text, is_danger=False):
+        super().__init__(parent)
+        # Отключаем системные рамки Windows и делаем фон прозрачным
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(450, 220)
+
+        # Главный слой (с отступами для тени)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+
+        # Сама карточка окна
+        self.frame = QFrame(self)
+        self.frame.setStyleSheet("""
+            QFrame { background-color: #24283b; border: 1px solid #3b4261; border-radius: 12px; }
+            QLabel { background: transparent; border: none; }
+        """)
+        
+        # Тень
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setColor(Qt.black)
+        shadow.setOffset(0, 5)
+        self.frame.setGraphicsEffect(shadow)
+
+        frame_layout = QVBoxLayout(self.frame)
+        frame_layout.setContentsMargins(20, 20, 20, 20)
+        frame_layout.setSpacing(15)
+
+        # Заголовок
+        header_layout = QHBoxLayout()
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+        
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setStyleSheet("""
+            QPushButton { background: transparent; color: #565f89; border: none; font-size: 14px; font-weight: bold; }
+            QPushButton:hover { color: #f7768e; }
+        """)
+        close_btn.clicked.connect(self.reject)
+        
+        header_layout.addWidget(title_lbl)
+        header_layout.addStretch()
+        header_layout.addWidget(close_btn)
+
+        # Контент
+        msg_layout = QHBoxLayout()
+        icon = QLabel("⚠️")
+        icon.setStyleSheet("font-size: 32px;")
+        icon.setAlignment(Qt.AlignTop)
+        
+        text_lbl = QLabel(message)
+        text_lbl.setStyleSheet("color: #a9b1d6; font-size: 13px; line-height: 1.5;")
+        text_lbl.setWordWrap(True)
+        
+        msg_layout.addWidget(icon)
+        msg_layout.addSpacing(10)
+        msg_layout.addWidget(text_lbl, 1)
+
+        # Кнопки
+        btn_layout = QHBoxLayout()
+        cancel_btn = QPushButton("Отмена")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        cancel_btn.setStyleSheet("""
+            QPushButton { background-color: #1e2030; color: white; padding: 8px 16px; border-radius: 6px; font-weight: bold; border: 1px solid #3b4261;}
+            QPushButton:hover { background-color: #3b4261; }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+
+        confirm_btn = QPushButton(confirm_text)
+        confirm_btn.setCursor(Qt.PointingHandCursor)
+        if is_danger:
+            confirm_btn.setStyleSheet("""
+                QPushButton { background-color: rgba(247, 118, 142, 0.2); color: #f7768e; padding: 8px 16px; border-radius: 6px; font-weight: bold; border: none;}
+                QPushButton:hover { background-color: #f7768e; color: #1a1b26; }
+            """)
+        else:
+            confirm_btn.setStyleSheet("""
+                QPushButton { background-color: #7aa2f7; color: #1a1b26; padding: 8px 16px; border-radius: 6px; font-weight: bold; border: none;}
+                QPushButton:hover { background-color: #8db0f8; }
+            """)
+        confirm_btn.clicked.connect(self.accept)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(confirm_btn)
+
+        frame_layout.addLayout(header_layout)
+        frame_layout.addLayout(msg_layout)
+        frame_layout.addStretch()
+        frame_layout.addLayout(btn_layout)
+
+        layout.addWidget(self.frame)
+
+        # Переменные для перетаскивания окна
+        self._is_tracking = False
+        self._start_pos = None
+
+    # Логика перетаскивания без стандартной рамки
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._is_tracking = True
+            self._start_pos = event.globalPos() - self.frameGeometry().topLeft()
+
+    def mouseMoveEvent(self, event):
+        if self._is_tracking:
+            self.move(event.globalPos() - self._start_pos)
+
+    def mouseReleaseEvent(self, event):
+        self._is_tracking = False
+
+
+# ==========================================
+# РЕЗИНОВАЯ СЕТКА
 # ==========================================
 class FlowLayout(QLayout):
     def __init__(self, parent=None, margin=0, spacing=20):
@@ -27,30 +147,22 @@ class FlowLayout(QLayout):
         return len(self.itemList)
 
     def itemAt(self, index):
-        if 0 <= index < len(self.itemList):
-            return self.itemList[index]
+        if 0 <= index < len(self.itemList): return self.itemList[index]
         return None
 
     def takeAt(self, index):
-        if 0 <= index < len(self.itemList):
-            return self.itemList.pop(index)
+        if 0 <= index < len(self.itemList): return self.itemList.pop(index)
         return None
 
     def expandingDirections(self):
         return Qt.Orientations(Qt.Orientation(0))
 
-    def hasHeightForWidth(self):
-        return True
-
-    def heightForWidth(self, width):
-        return self.doLayout(QRect(0, 0, width, 0), True)
-
+    def hasHeightForWidth(self): return True
+    def heightForWidth(self, width): return self.doLayout(QRect(0, 0, width, 0), True)
     def setGeometry(self, rect):
         super().setGeometry(rect)
         self.doLayout(rect, False)
-
-    def sizeHint(self):
-        return self.minimumSize()
+    def sizeHint(self): return self.minimumSize()
 
     def minimumSize(self):
         size = QSize()
@@ -64,24 +176,19 @@ class FlowLayout(QLayout):
         x = rect.x()
         y = rect.y()
         lineHeight = 0
-
         for item in self.itemList:
             spaceX = self.spacing()
             spaceY = self.spacing()
-            
             nextX = x + item.sizeHint().width() + spaceX
             if nextX - spaceX > rect.right() and lineHeight > 0:
                 x = rect.x()
                 y = y + lineHeight + spaceY
                 nextX = x + item.sizeHint().width() + spaceX
                 lineHeight = 0
-
             if not testOnly:
                 item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
-
             x = nextX
             lineHeight = max(lineHeight, item.sizeHint().height())
-
         return y + lineHeight - rect.y()
 
 class FlowWidget(QWidget):
@@ -89,21 +196,18 @@ class FlowWidget(QWidget):
         super().__init__()
         self.layout = FlowLayout(self, margin=0, spacing=20)
 
-    def addWidget(self, widget):
-        self.layout.addWidget(widget)
-
+    def addWidget(self, widget): self.layout.addWidget(widget)
     def clear(self):
         while self.layout.count():
             item = self.layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            if item.widget(): item.widget().deleteLater()
                 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.setMinimumHeight(self.layout.heightForWidth(self.width()))
 
 # ==========================================
-# ИНТЕРФЕЙС КАРТОЧЕК И ОКНА
+# КАРТОЧКА ИСТОРИИ
 # ==========================================
 class HistoryCard(QFrame):
     def __init__(self, record, server_data, delete_cb):
@@ -122,15 +226,8 @@ class HistoryCard(QFrame):
         self.setGraphicsEffect(shadow)
         
         self.setStyleSheet("""
-            QFrame#HistoryCard { 
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #2a2d3d, stop: 1 #24283b); 
-                border-radius: 15px; 
-                border: 1px solid #3b4261; 
-            }
-            QFrame#HistoryCard:hover { 
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #32364a, stop: 1 #2f354d); 
-                border: 1px solid #4a5175; 
-            }
+            QFrame#HistoryCard { background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #2a2d3d, stop: 1 #24283b); border-radius: 15px; border: 1px solid #3b4261; }
+            QFrame#HistoryCard:hover { background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #32364a, stop: 1 #2f354d); border: 1px solid #4a5175; }
         """)
         
         layout = QVBoxLayout(self)
@@ -143,7 +240,6 @@ class HistoryCard(QFrame):
         time_lbl = QLabel(f"Создан: {timestamp}")
         time_lbl.setStyleSheet("color: #9ece6a; font-size: 12px; background: transparent; border: none;")
 
-        # ИСПРАВЛЕНО: Теперь используется self.filepath
         path_lbl = QLabel(self.filepath)
         path_lbl.setStyleSheet("color: #565f89; font-size: 10px; background: transparent; border: none;")
         path_lbl.setWordWrap(True)
@@ -175,10 +271,7 @@ class HistoryCard(QFrame):
         self.progress.setFixedHeight(6)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
-        self.progress.setStyleSheet("""
-            QProgressBar { background-color: #1a1b26; border-radius: 3px; border: none; }
-            QProgressBar::chunk { background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #7aa2f7, stop: 1 #9ece6a); border-radius: 3px; }
-        """)
+        self.progress.setStyleSheet("QProgressBar { background-color: #1a1b26; border-radius: 3px; border: none; } QProgressBar::chunk { background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #7aa2f7, stop: 1 #9ece6a); border-radius: 3px; }")
 
         layout.addWidget(name_lbl)
         layout.addWidget(time_lbl)
@@ -188,11 +281,15 @@ class HistoryCard(QFrame):
         layout.addWidget(self.progress)
 
     def start_restore(self):
-        reply = QMessageBox.warning(self, 'Внимание!', 
-                                    'Вы собираетесь восстановить этот архив на сервер.\nЭто действие ПЕРЕЗАПИШЕТ существующие файлы в папке.\nВы уверены?', 
-                                    QMessageBox.Yes | QMessageBox.No)
+        # ИСПОЛЬЗУЕМ НАШ НОВЫЙ ДИАЛОГ
+        dialog = CustomConfirmDialog(
+            self.window(), 
+            "Восстановление", 
+            "Вы собираетесь восстановить этот архив на сервер.\nЭто действие ПЕРЕЗАПИШЕТ существующие файлы в папке. Вы уверены?", 
+            "Да, восстановить"
+        )
         
-        if reply == QMessageBox.Yes:
+        if dialog.exec_():
             self.restore_btn.setEnabled(False)
             self.restore_btn.setText("...")
             self.progress.setVisible(True)
@@ -208,11 +305,7 @@ class HistoryCard(QFrame):
         self.restore_btn.setText("Восстановить")
         self.progress.setVisible(False)
         self.progress.setValue(0)
-        
-        if success:
-            QMessageBox.information(self, "Успех", msg)
-        else:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось восстановить бэкап:\n{msg}")
+        Toast(self.window(), msg, is_error=not success)
 
 
 class HistoryView(QWidget):
@@ -277,12 +370,21 @@ class HistoryView(QWidget):
             self.flow_widget.addWidget(card)
 
     def delete_record(self, record_id, filepath):
-        reply = QMessageBox.question(self, 'Удаление', 'Безвозвратно удалить этот архив с диска?', QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
+        # ИСПОЛЬЗУЕМ НАШ НОВЫЙ ДИАЛОГ
+        dialog = CustomConfirmDialog(
+            self.window(), 
+            "Удаление архива", 
+            "Вы уверены, что хотите безвозвратно удалить этот архив с диска? Это действие нельзя отменить.", 
+            "Удалить",
+            is_danger=True # Кнопка станет красной
+        )
+
+        if dialog.exec_():
             try:
                 if os.path.exists(filepath):
                     os.remove(filepath)
-            except Exception as e:
+            except Exception:
                 pass
             self.db.delete_history_record(record_id)
             self.load_history()
+            Toast(self.window(), "Архив успешно удален!", is_error=False)

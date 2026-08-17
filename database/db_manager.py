@@ -1,13 +1,18 @@
 import sqlite3
 import os
+from pathlib import Path
 
-DB_PATH = "database/backups.db"
+# Определяем защищенную папку в профиле пользователя (например, C:\Users\Имя\AppData\Roaming\SSHBackupManager)
+APP_DATA_DIR = Path(os.getenv('APPDATA', Path.home())) / "SSHBackupManager"
+DB_DIR = APP_DATA_DIR / "database"
+DB_PATH = DB_DIR / "backups.db"
 
 class DBManager:
     def __init__(self):
-        if not os.path.exists("database"):
-            os.makedirs("database")
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        # Создаем директорию AppData\Roaming\SSHBackupManager\database, если её нет
+        DB_DIR.mkdir(parents=True, exist_ok=True)
+        
+        self.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.init_db()
 
@@ -69,6 +74,7 @@ class DBManager:
         self.conn.commit()
 
     def add_history(self, server_id, filename, filepath):
+        self.cursor.execute("SELECT id, filename, filepath, timestamp FROM backup_history WHERE server_id = ? ORDER BY timestamp DESC", (server_id,))
         self.cursor.execute("INSERT INTO backup_history (server_id, filename, filepath) VALUES (?, ?, ?)", (server_id, filename, filepath))
         self.conn.commit()
 

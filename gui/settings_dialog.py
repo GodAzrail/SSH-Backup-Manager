@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from database.db_manager import DBManager
+from gui.toast import Toast
 
 class SettingsView(QWidget):
     def __init__(self, scheduler, parent=None):
@@ -141,4 +142,4 @@ class SettingsView(QWidget):
         if self.scheduler:
             self.scheduler.reload_jobs()
             
-        QMessageBox.information(self, "Успех", "Настройки успешно сохранены!")
+        Toast(self.window(), "Настройки успешно сохранены!")

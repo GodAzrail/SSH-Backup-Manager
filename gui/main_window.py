@@ -1,11 +1,17 @@
+import sys
 import logging
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton, 
                              QLabel, QScrollArea, QHBoxLayout, QMessageBox, QProgressBar, 
                              QFrame, QListWidget, QListWidgetItem, QGraphicsDropShadowEffect,
-                             QSystemTrayIcon, QMenu, QAction, qApp, QStyle, QStackedWidget, QTextEdit)
-# ИСПРАВЛЕНИЕ: Добавлен QTimer в импорты
-from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QTimer 
+                             QSystemTrayIcon, QMenu, QAction, qApp, QStyle, QStackedWidget, QTextEdit,
+                             QSizePolicy)
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QPropertyAnimation, QEasingCurve, QRect
 from PyQt5.QtGui import QFont
+
+# Импортируем нашу кастомную шапку и Toast
+from gui.title_bar import CustomTitleBar
+from gui.toast import Toast
+
 from database.db_manager import DBManager
 from gui.server_panel import ServerPanel 
 from gui.history_window import HistoryView, FlowWidget 
@@ -59,8 +65,9 @@ class StatusCheckThread(QThread):
             self.status_signal.emit(False)
 
 class ServerCard(QFrame):
-    def __init__(self, server_data, delete_cb, edit_cb, history_cb):
+    def __init__(self, server_data, delete_cb, edit_cb, history_cb, main_window):
         super().__init__()
+        self.main_window = main_window 
         self.server_data = server_data
         self.setFixedSize(300, 150) 
         
@@ -82,7 +89,7 @@ class ServerCard(QFrame):
         top_layout = QHBoxLayout()
         top_layout.setSpacing(12)
         
-        icon = QLabel("UB")
+        icon = QLabel(server_data[1][:2].upper())
         icon.setFixedSize(45, 45)
         icon.setAlignment(Qt.AlignCenter)
         icon.setFont(QFont("Arial", 14, QFont.Bold))
@@ -166,14 +173,14 @@ class ServerCard(QFrame):
         edit_btn.setCursor(Qt.PointingHandCursor)
         edit_btn.setFixedSize(30, 30)
         edit_btn.setFont(QFont("Arial", 14))
-        edit_btn.setStyleSheet("QPushButton { background-color: rgba(59, 66, 97, 0.5); color: #a9b1d6; font-size: 14px; border-radius: 6px; padding: 0px; text-align: center; } QPushButton:hover { background-color: #3b4261; color: white; }")
+        edit_btn.setStyleSheet("QPushButton { background-color: rgba(59, 66, 97, 0.5); color: #a9b1d6; border-radius: 6px; padding: 0px; } QPushButton:hover { background-color: #3b4261; color: white; }")
         edit_btn.clicked.connect(lambda: edit_cb(self.server_data))
 
         del_btn = QPushButton("✕")
         del_btn.setCursor(Qt.PointingHandCursor)
         del_btn.setFixedSize(30, 30)
         del_btn.setFont(QFont("Arial", 12))
-        del_btn.setStyleSheet("QPushButton { background-color: rgba(247, 118, 142, 0.2); color: #f7768e; font-size: 12px; border-radius: 6px; padding: 0px; text-align: center; } QPushButton:hover { background-color: #f7768e; color: #1a1b26; }")
+        del_btn.setStyleSheet("QPushButton { background-color: rgba(247, 118, 142, 0.2); color: #f7768e; border-radius: 6px; padding: 0px; } QPushButton:hover { background-color: #f7768e; color: #1a1b26; }")
         del_btn.clicked.connect(lambda: delete_cb(self.server_data[0]))
         
         btn_layout.addWidget(self.backup_btn)
@@ -191,11 +198,6 @@ class ServerCard(QFrame):
         layout.addLayout(top_layout)
         layout.addLayout(btn_layout)
         layout.addWidget(self.progress)
-        
-        # --- ТАЙМЕР ДЛЯ БЭКАПА ---
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer_display)
-        self.elapsed_seconds = 0
 
     def set_dot_color(self, color):
         self.status_dot.setStyleSheet(f"QLabel {{ color: {color}; font-size: 12px; background: transparent; border: none; min-width: 15px; max-width: 15px; min-height: 15px; max-height: 15px; }}")
@@ -205,45 +207,48 @@ class ServerCard(QFrame):
         self.set_dot_color(color)
         self.status_dot.setToolTip("Сервер онлайн" if is_online else "Сервер недоступен")
 
-    # Обновление текста на кнопке во время бэкапа
-    def update_timer_display(self):
-        self.elapsed_seconds += 1
-        mins = self.elapsed_seconds // 60
-        secs = self.elapsed_seconds % 60
-        self.backup_btn.setText(f"⏳ {mins:02}:{secs:02}")
-
     def start_backup(self):
         self.backup_btn.setEnabled(False)
-        self.elapsed_seconds = 0
-        self.backup_btn.setText("⏳ 00:00")
-        self.timer.start(1000) # Запускаем таймер (1 раз в секунду)
-        
         self.progress.setVisible(True)
         self.progress.setValue(0)
+        
         self.thread = BackupThread(self.server_data)
         self.thread.progress_signal.connect(self.progress.setValue)
+        
+        if hasattr(self.thread, 'time_signal'):
+            self.thread.time_signal.connect(self.backup_btn.setText)
+            
         self.thread.finished_signal.connect(self.on_finish)
         self.thread.start()
 
     def on_finish(self, success, msg):
-        self.timer.stop() # Останавливаем таймер
         self.backup_btn.setEnabled(True)
         self.backup_btn.setText("Бэкап")
         self.progress.setVisible(False)
         self.progress.setValue(0)
-        if success: QMessageBox.information(self, "Успех", msg)
-        else: QMessageBox.critical(self, "Ошибка", msg)
+        
+        Toast(self.main_window, msg, is_error=not success)
 
 class MainWindow(QMainWindow):
     def __init__(self, scheduler):
         super().__init__()
         self.scheduler = scheduler
-        self.setWindowTitle("SSH Backup Manager")
-        self.resize(1590, 700)
-        self.setMinimumSize(1590, 700)
-        self.setStyleSheet(STYLESHEET)
-        self.db = DBManager()
         
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowSystemMenuHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
+        self.setWindowTitle("SSH Backup Manager")
+        self.resize(1650, 700)
+        self.setMinimumSize(1650, 600)
+        self.setStyleSheet(STYLESHEET)
+        
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes.wintypes import HWND
+            hwnd = HWND(int(self.winId()))
+            user32 = ctypes.windll.user32
+            style = user32.GetWindowLongW(hwnd, -16) 
+            user32.SetWindowLongW(hwnd, -16, style | 0x00C00000 | 0x00040000)
+
+        self.db = DBManager()
         self.gui_logger = QtLogHandler()
         self.gui_logger.setFormatter(logging.Formatter('[%(asctime)s] %(message)s', datefmt='%H:%M:%S'))
         logging.getLogger().addHandler(self.gui_logger)
@@ -251,15 +256,18 @@ class MainWindow(QMainWindow):
         
         self.init_tray_icon()
         
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        root_layout = QHBoxLayout(central_widget)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
+        # === 1. ЛЕВЫЙ САЙДБАР ===
         sidebar_container = QWidget()
         sidebar_container.setFixedWidth(240)
         sidebar_container.setStyleSheet("QWidget { background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #1e2030, stop: 1 #24283b); border-right: 1px solid #3b4261; }")
+        
         sidebar_layout = QVBoxLayout(sidebar_container)
         sidebar_layout.setContentsMargins(0, 20, 0, 20)
         sidebar_layout.setSpacing(0)
@@ -275,33 +283,84 @@ class MainWindow(QMainWindow):
         separator.setStyleSheet("QFrame { color: #3b4261; background-color: #3b4261; border: none; height: 1px; margin: 10px 20px; }")
         sidebar_layout.addWidget(separator)
         
+        # --- ВЕРХНИЙ СПИСОК (только Серверы и Настройки) ---
         self.sidebar = QListWidget()
         self.sidebar.setStyleSheet("QListWidget { background: transparent; border: none; outline: none; }")
+        self.sidebar.setFixedHeight(120) # Уменьшили высоту под 2 элемента
         
         item_hosts = QListWidgetItem("Серверы")
-        item_logs = QListWidgetItem("Логи")
         item_settings = QListWidgetItem("Настройки")
         
         item_hosts.setSizeHint(QSize(200, 50))
-        item_logs.setSizeHint(QSize(200, 50))
         item_settings.setSizeHint(QSize(200, 50))
         
         self.sidebar.addItem(item_hosts)
-        self.sidebar.addItem(item_logs)
         self.sidebar.addItem(item_settings)
         self.sidebar.setCurrentItem(item_hosts)
         self.sidebar.itemClicked.connect(self.handle_sidebar)
         
         sidebar_layout.addWidget(self.sidebar)
-        sidebar_layout.addStretch()
+        
+        # Пружина, которая толкает элементы вверх и вниз
+        sidebar_layout.addStretch() 
+        
+        # --- КНОПКА ЛОГОВ (внизу) ---
+        self.btn_logs = QPushButton("⌨  Консоль логов") # Добавили легкую иконку для красоты
+        self.btn_logs.setCursor(Qt.PointingHandCursor)
+        self.btn_logs.setCheckable(True) 
+        self.btn_logs.setStyleSheet("""
+            QPushButton { 
+                background-color: #1a1b26; /* Чуть темнее фона сайдбара (углубление) */
+                color: #565f89; /* Приглушенный цвет текста, чтобы не кричало */
+                font-size: 13px; 
+                font-weight: bold; 
+                text-align: left; 
+                padding: 12px 15px; 
+                border-radius: 8px; 
+                margin: 0px 15px 15px 15px; /* Отступы от краев сайдбара */
+                border: 1px solid #292e42; /* Едва заметная контурная рамка */
+            }
+            QPushButton:hover:!checked { 
+                background-color: #24283b; 
+                color: #a9b1d6; /* При наведении текст становится ярче */
+                border: 1px solid #3b4261;
+            }
+            QPushButton:checked {
+                background-color: #3b4261; 
+                color: white; 
+                border: 1px solid #3b4261;
+                border-left: 3px solid #7aa2f7; /* Синяя полоска слева при активации */
+                border-radius: 8px;
+            }
+        """)
+        self.btn_logs.clicked.connect(self.open_logs_page)
+        sidebar_layout.addWidget(self.btn_logs)
+        # ----------------------------
+
         version_label = QLabel("v1.0.0")
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("QLabel { color: #565f89; font-size: 11px; background: transparent; border: none; padding: 10px; }")
         sidebar_layout.addWidget(version_label)
 
+        root_layout.addWidget(sidebar_container)
+
+        # === 2. ПРАВАЯ ЧАСТЬ (Шапка + Контент) ===
+        right_side_widget = QWidget()
+        right_side_layout = QVBoxLayout(right_side_widget)
+        right_side_layout.setContentsMargins(0, 0, 0, 0)
+        right_side_layout.setSpacing(0)
+
+        self.title_bar = CustomTitleBar(self)
+        right_side_layout.addWidget(self.title_bar)
+
+        content_area_widget = QWidget()
+        content_area_layout = QHBoxLayout(content_area_widget)
+        content_area_layout.setContentsMargins(0, 0, 0, 0)
+        content_area_layout.setSpacing(0)
+
         content_wrapper = QWidget()
         content_layout = QVBoxLayout(content_wrapper)
-        content_layout.setContentsMargins(30, 30, 30, 30)
+        content_layout.setContentsMargins(30, 10, 30, 30) 
         content_layout.setSpacing(20)
 
         self.content_stack = QStackedWidget()
@@ -325,6 +384,12 @@ class MainWindow(QMainWindow):
         title_container.addWidget(title)
         title_container.addWidget(subtitle)
         
+        header.addLayout(title_container)
+        header.addStretch()
+        
+        self.action_bar = QHBoxLayout()
+        self.action_bar.setSpacing(15)
+        
         add_btn = QPushButton("+ Добавить сервер")
         add_btn.setCursor(Qt.PointingHandCursor)
         add_btn.setObjectName("BtnPrimary")
@@ -332,10 +397,9 @@ class MainWindow(QMainWindow):
         add_btn.setFont(QFont("Arial", 11, QFont.Bold))
         add_btn.clicked.connect(self.open_add_server_panel)
         
-        header.addLayout(title_container)
-        header.addStretch()
-        header.addWidget(add_btn, 0, Qt.AlignVCenter)
-        
+        self.action_bar.addWidget(add_btn)
+        self.action_bar.addStretch() 
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff) 
@@ -345,6 +409,7 @@ class MainWindow(QMainWindow):
         self.scroll.setWidget(self.flow_widget)
         
         servers_layout.addLayout(header)
+        servers_layout.addLayout(self.action_bar)
         servers_layout.addWidget(self.scroll)
         self.content_stack.addWidget(self.servers_page) 
         
@@ -376,15 +441,99 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(self.settings_page)
 
         self.right_panel = ServerPanel()
+        self.right_panel.setMaximumWidth(0) 
         self.right_panel.hide() 
         self.right_panel.saved_signal.connect(self.on_server_saved)
-        self.right_panel.closed_signal.connect(self.right_panel.hide)
+        self.right_panel.closed_signal.connect(self.close_right_panel)
 
-        main_layout.addWidget(sidebar_container)
-        main_layout.addWidget(content_wrapper)
-        main_layout.addWidget(self.right_panel)
+        content_area_layout.addWidget(content_wrapper)
+        content_area_layout.addWidget(self.right_panel)
+
+        right_side_layout.addWidget(content_area_widget)
+        root_layout.addWidget(right_side_widget)
         
         self.load_servers()
+
+    # --- ЛОГИКА НАВИГАЦИИ (ОБНОВЛЕНО) ---
+    def handle_sidebar(self, item):
+        # Если кликнули на верхний список - отключаем подсветку кнопки логов
+        self.btn_logs.setChecked(False) 
+        
+        if item.text() == "Серверы":
+            self.content_stack.setCurrentIndex(0)
+        elif item.text() == "Настройки":
+            self.content_stack.setCurrentIndex(2)
+
+    def open_logs_page(self):
+        # Если кликнули на кнопку логов - снимаем выделение с верхнего списка
+        self.sidebar.clearSelection() 
+        self.btn_logs.setChecked(True)
+        self.content_stack.setCurrentIndex(1)
+    # ------------------------------------
+
+    def nativeEvent(self, eventType, message):
+        if sys.platform == "win32" and eventType == b"windows_generic_MSG":
+            import ctypes
+            from ctypes import wintypes
+            msg = wintypes.MSG.from_address(message.__int__())
+            
+            if msg.message == 0x0083:
+                return True, 0
+                
+            if msg.message == 0x0084:
+                x = msg.pt.x - self.geometry().x()
+                y = msg.pt.y - self.geometry().y()
+                
+                border = 5
+                if x < border and y < border: return True, 13 
+                if x > self.width() - border and y < border: return True, 14 
+                if x < border and y > self.height() - border: return True, 16 
+                if x > self.width() - border and y > self.height() - border: return True, 17 
+                if x < border: return True, 10 
+                if x > self.width() - border: return True, 11 
+                if y < border: return True, 12 
+                if y > self.height() - border: return True, 15 
+                
+                if 0 < y < 40 and 240 < x < self.width() - 150:
+                    return True, 2 
+                    
+        return super().nativeEvent(eventType, message)
+
+    def open_right_panel(self):
+        self.right_panel.show()
+        target_width = 385 
+        
+        self.anim_min = QPropertyAnimation(self.right_panel, b"minimumWidth")
+        self.anim_min.setDuration(400)
+        self.anim_min.setStartValue(self.right_panel.width())
+        self.anim_min.setEndValue(target_width)
+        self.anim_min.setEasingCurve(QEasingCurve.OutExpo)
+
+        self.anim_max = QPropertyAnimation(self.right_panel, b"maximumWidth")
+        self.anim_max.setDuration(400)
+        self.anim_max.setStartValue(self.right_panel.width())
+        self.anim_max.setEndValue(target_width)
+        self.anim_max.setEasingCurve(QEasingCurve.OutExpo)
+
+        self.anim_min.start()
+        self.anim_max.start()
+
+    def close_right_panel(self):
+        self.anim_min = QPropertyAnimation(self.right_panel, b"minimumWidth")
+        self.anim_min.setDuration(300)
+        self.anim_min.setStartValue(self.right_panel.width())
+        self.anim_min.setEndValue(0)
+        self.anim_min.setEasingCurve(QEasingCurve.InExpo)
+
+        self.anim_max = QPropertyAnimation(self.right_panel, b"maximumWidth")
+        self.anim_max.setDuration(300)
+        self.anim_max.setStartValue(self.right_panel.width())
+        self.anim_max.setEndValue(0)
+        self.anim_max.setEasingCurve(QEasingCurve.InExpo)
+
+        self.anim_min.start()
+        self.anim_max.start()
+        self.anim_max.finished.connect(self.right_panel.hide)
 
     def append_log(self, text):
         self.log_console.append(text)
@@ -404,16 +553,18 @@ class MainWindow(QMainWindow):
 
     def open_add_server_panel(self):
         self.right_panel.clear_data()
-        self.right_panel.show()
+        if self.right_panel.width() == 0 or self.right_panel.isHidden():
+            self.open_right_panel()
 
     def open_edit_server_panel(self, data):
         self.right_panel.load_data(data)
-        self.right_panel.show()
+        if self.right_panel.width() == 0 or self.right_panel.isHidden():
+            self.open_right_panel()
 
     def on_server_saved(self):
         self.scheduler.reload_jobs()
         self.load_servers()
-        self.right_panel.hide()
+        self.close_right_panel()
 
     def init_tray_icon(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -457,20 +608,11 @@ class MainWindow(QMainWindow):
                 self.hide() 
         super().changeEvent(event)
 
-    def handle_sidebar(self, item):
-        if item.text() == "Серверы":
-            self.content_stack.setCurrentIndex(0)
-        elif item.text() == "Логи":
-            self.content_stack.setCurrentIndex(1)
-        elif item.text() == "Настройки":
-            self.content_stack.setCurrentIndex(2)
-
     def load_servers(self):
         self.flow_widget.clear() 
-        
         servers = self.db.get_all_servers()
         for srv in servers:
-            card = ServerCard(srv, self.delete_server_handler, self.open_edit_server_panel, self.open_history_window)
+            card = ServerCard(srv, self.delete_server_handler, self.open_edit_server_panel, self.open_history_window, self)
             self.flow_widget.addWidget(card) 
 
     def delete_server_handler(self, server_id):

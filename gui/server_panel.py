@@ -1,7 +1,12 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit, 
-                             QPushButton, QCheckBox, QMessageBox, QHBoxLayout, 
-                             QSpinBox, QComboBox, QTimeEdit, QStackedWidget, QLabel, QScrollArea, QFrame)
+                             QPushButton, QCheckBox, QHBoxLayout, 
+                             QSpinBox, QComboBox, QTimeEdit, QStackedWidget, QLabel, QFrame,
+                             QGraphicsDropShadowEffect)
 from PyQt5.QtCore import QThread, pyqtSignal, QTime, Qt
+
+# Импортируем наш стильный Toast
+from gui.toast import Toast
+
 from core.ssh_manager import SSHManager
 from utils.encryption import encrypt_password
 from database.db_manager import DBManager
@@ -15,63 +20,96 @@ class SSHTestThread(QThread):
     def run(self):
         try:
             manager = SSHManager(self.host, int(self.port), self.user, self.password)
-            if manager.test_connection(): self.result_signal.emit(True, "Подключение успешно установлено!")
-            else: self.result_signal.emit(False, "Не удалось подключиться.")
+            if manager.test_connection(): 
+                self.result_signal.emit(True, "Подключение успешно установлено!")
+            else: 
+                self.result_signal.emit(False, "Не удалось подключиться к серверу.")
         except Exception as e:
-            self.result_signal.emit(False, f"Ошибка: {str(e)}")
+            self.result_signal.emit(False, f"Ошибка соединения: {str(e)}")
 
-class ServerPanel(QFrame):
+# ОБНОВЛЕНО: Теперь наследуемся от QWidget (прозрачный контейнер)
+class ServerPanel(QWidget):
     saved_signal = pyqtSignal()
     closed_signal = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(340)
         self.db = DBManager()
         self.server_id = None 
 
-        self.setObjectName("RightSidebar")
+        self.setObjectName("OuterContainer")
+        
+        # --- ОБНОВЛЕНО: Настройка прозрачного внешнего контейнера и стилей внутренних элементов ---
         self.setStyleSheet("""
-            #RightSidebar { background-color: #1e2030; border-left: 1px solid #3b4261; }
+            #OuterContainer { background: transparent; }
+            #RightSidebar { 
+                background-color: #1e2030; 
+                border: 1px solid #3b4261; 
+                border-radius: 16px; 
+            }
             QLabel { color: #a9b1d6; font-size: 13px; font-weight: bold; background: transparent; border: none; }
             QLineEdit, QSpinBox, QComboBox, QTimeEdit { background-color: #24283b; color: white; border: 1px solid #3b4261; border-radius: 6px; padding: 6px; }
             QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QTimeEdit:focus { border: 1px solid #7aa2f7; }
-            QCheckBox { color: #a9b1d6; font-weight: bold; font-size: 13px; background: transparent; }
+            
+            QCheckBox { color: #a9b1d6; font-weight: bold; font-size: 13px; spacing: 10px; }
+            QCheckBox::indicator { width: 18px; height: 18px; background-color: #24283b; border: 2px solid #3b4261; border-radius: 4px; }
+            QCheckBox::indicator:hover { border: 2px solid #7aa2f7; }
+            QCheckBox::indicator:checked { background-color: #9ece6a; border: 2px solid #9ece6a; }
+            
             QPushButton { border-radius: 6px; padding: 8px; font-weight: bold; border: none; }
             #BtnPrimary { background-color: #7aa2f7; color: #1a1b26; }
             #BtnPrimary:hover { background-color: #8db0f8; }
             #BtnSuccess { background-color: #9ece6a; color: #1a1b26; }
             #BtnSuccess:hover { background-color: #b3df7a; }
-            QScrollArea { border: none; background: transparent; }
         """)
+
+        # --- ОБНОВЛЕНО: Создаем внутренний закругленный блок ---
+        self.inner_frame = QFrame()
+        self.inner_frame.setObjectName("RightSidebar")
+        self.inner_frame.setFixedWidth(340) # Жесткая фиксация спасает от сжимания во время анимации
+
+        # Добавляем тень для блока
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(25)
+        shadow.setColor(Qt.black)
+        shadow.setOffset(0, 8)
+        self.inner_frame.setGraphicsEffect(shadow)
+
+        # Располагаем внутренний блок во внешнем контейнере (с отступами)
+        outer_layout = QVBoxLayout(self)
+        # Отступы: Слева: 15, Сверху: 30, Справа: 30, Снизу: 30
+        outer_layout.setContentsMargins(15, 30, 30, 30)
+        outer_layout.addWidget(self.inner_frame, 0, Qt.AlignLeft)
 
         self.day_map = {"Каждый день": "*", "Понедельник": "mon", "Вторник": "tue", "Среда": "wed", "Четверг": "thu", "Пятница": "fri", "Суббота": "sat", "Воскресенье": "sun"}
         self.rev_day_map = {v: k for k, v in self.day_map.items()}
 
-        main_layout = QVBoxLayout(self)
+        # Теперь главный layout привязан к INNER FRAME
+        main_layout = QVBoxLayout(self.inner_frame)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Шапка с кнопкой закрытия
+        # 1. Шапка
         header = QHBoxLayout()
         header.setContentsMargins(20, 20, 20, 10)
         self.title_lbl = QLabel("Настройка сервера")
         self.title_lbl.setStyleSheet("color: white; font-size: 18px;")
+        
         close_btn = QPushButton("→|")
         close_btn.setFixedSize(35, 35)
+        close_btn.setCursor(Qt.PointingHandCursor)
         close_btn.setStyleSheet("QPushButton { background: transparent; color: #f7768e; font-size: 16px; } QPushButton:hover { background: #24283b; }")
         close_btn.clicked.connect(self.closed_signal.emit)
+        
         header.addWidget(self.title_lbl)
         header.addStretch()
         header.addWidget(close_btn)
         main_layout.addLayout(header)
 
-        # Скроллируемая форма
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
+        # 2. Форма ввода
         content_widget = QWidget()
         content_widget.setStyleSheet("background: transparent;")
         form_layout = QFormLayout(content_widget)
-        form_layout.setContentsMargins(20, 0, 20, 20)
+        form_layout.setContentsMargins(20, 0, 20, 10)
 
         self.name_input = QLineEdit()
         self.host_input = QLineEdit()
@@ -120,20 +158,27 @@ class ServerPanel(QFrame):
         form_layout.addRow("Режим:", self.schedule_type_combo)
         form_layout.addRow("Время:", self.stack)
 
-        scroll.setWidget(content_widget)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(content_widget)
 
-        # Кнопки сохранения внизу
+        # Пружина, сдвигающая кнопки вниз
+        main_layout.addStretch(1)
+
+        # 3. Кнопки сохранения внизу
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(20, 10, 20, 20)
         self.test_btn = QPushButton("Тест SSH")
         self.test_btn.setObjectName("BtnPrimary")
+        self.test_btn.setCursor(Qt.PointingHandCursor)
         self.test_btn.clicked.connect(self.test_connection)
+        
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.setObjectName("BtnSuccess")
+        self.save_btn.setCursor(Qt.PointingHandCursor)
         self.save_btn.clicked.connect(self.save_server)
+        
         btn_layout.addWidget(self.test_btn)
         btn_layout.addWidget(self.save_btn)
+        
         main_layout.addLayout(btn_layout)
 
     def clear_data(self):
@@ -179,9 +224,11 @@ class ServerPanel(QFrame):
 
     def test_connection(self):
         host, port, user, password = self.host_input.text(), self.port_input.text(), self.user_input.text(), self.password_input.text()
+        
         if not all([host, port, user]):
-            QMessageBox.warning(self, "Ошибка", "Заполните хост, порт и пользователя!")
+            Toast(self.window(), "Заполните хост, порт и пользователя!", is_error=True)
             return
+            
         self.test_btn.setEnabled(False)
         self.test_btn.setText("Проверка...")
         self.test_thread = SSHTestThread(host, port, user, password)
@@ -191,8 +238,8 @@ class ServerPanel(QFrame):
     def on_test_finished(self, success, message):
         self.test_btn.setEnabled(True)
         self.test_btn.setText("Тест SSH")
-        if success: QMessageBox.information(self, "Успех", message)
-        else: QMessageBox.critical(self, "Ошибка", message)
+        
+        Toast(self.window(), message, is_error=not success)
 
     def save_server(self):
         name, host, port, user = self.name_input.text(), self.host_input.text(), self.port_input.text(), self.user_input.text()
@@ -204,14 +251,16 @@ class ServerPanel(QFrame):
         cron_time = self.cron_time_edit.time().toString("HH:mm")
 
         if not all([name, host, port, user, remote, local]):
-            QMessageBox.warning(self, "Ошибка", "Заполните все обязательные поля!")
+            Toast(self.window(), "Заполните все обязательные поля!", is_error=True)
             return
         
         enc_password = encrypt_password(password) if password else b""
         
         if self.server_id: 
             self.db.update_server(self.server_id, name, host, int(port), user, enc_password, "", remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time)
+            Toast(self.window(), "Настройки сервера обновлены!", is_error=False)
         else: 
             self.db.add_server(name, host, int(port), user, enc_password, "", remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time)
+            Toast(self.window(), "Новый сервер успешно добавлен!", is_error=False)
             
         self.saved_signal.emit()
