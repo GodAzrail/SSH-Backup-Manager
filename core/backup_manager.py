@@ -1,10 +1,37 @@
 import os
-import time # Необходим для замера времени
+import time 
 import logging
 from PyQt5.QtCore import QThread, pyqtSignal
 from core.ssh_manager import SSHManager
 from utils.encryption import decrypt_password
 from database.db_manager import DBManager
+
+def translate_error(err_str):
+    """Переводит и фильтрует системные ошибки Linux/SSH на понятный русский язык"""
+    if not err_str: 
+        return "Неизвестная ошибка."
+    
+    err_str = str(err_str).strip()
+    
+    translations = {
+        "No space left on device": "На сервере закончилось свободное место.",
+        "Permission denied": "Отказано в доступе. Проверьте права пользователя.",
+        "No such file or directory": "Указанный путь или папка не существует на сервере.",
+        "Authentication failed": "Ошибка авторизации (неверный пароль, пользователь или SSH-ключ).",
+        "Connection timed out": "Время ожидания подключения истекло. Сервер недоступен.",
+        "Network is unreachable": "Сеть недоступна. Проверьте подключение к интернету.",
+        "Connection refused": "В подключении отказано. Проверьте правильность порта (обычно 22).",
+        "Name or service not known": "Не удалось определить IP-адрес или домен хоста."
+    }
+    
+    for eng, rus in translations.items():
+        if eng.lower() in err_str.lower():
+            return rus
+            
+    if "tar: Removing leading" in err_str:
+        err_str = err_str.replace("tar: Removing leading '/' from member names", "").strip()
+        
+    return err_str if err_str else "Произошла ошибка при выполнении операции."
 
 def rotate_backups(server_id, max_backups):
     db = DBManager()
@@ -21,7 +48,7 @@ def rotate_backups(server_id, max_backups):
             logging.error(f"Не удалось удалить старый бэкап {filepath}: {e}")
 
 def perform_background_backup(server_data):
-    server_id, name, host, port, username, pwd_blob, key_path, remote_path, local_path, auto, interval, max_backups, schedule_type, cron_day, cron_time = server_data
+    server_id, name, host, port, username, pwd_blob, key_path, remote_path, local_path, auto, interval, max_backups, schedule_type, cron_day, cron_time, *extra = server_data
     ssh_mgr = None
     remote_archive_path = None
     start_time = time.time()
@@ -31,6 +58,9 @@ def perform_background_backup(server_data):
         
         logging.info(f"[{name}] Авто-бэкап: Подключение к серверу...")
         ssh_mgr.connect()
+        
+        # Очистка мусора от прошлых сбоев перед созданием нового архива
+        ssh_mgr.client.exec_command("rm -f /tmp/*backup_*.tar.gz /tmp/restore_*.tar.gz")
         
         archive_name = f"full_backup_{int(time.time())}.tar.gz" if remote_path == "/" else f"backup_{int(time.time())}.tar.gz"
         remote_archive_path = f"/tmp/{archive_name}"
@@ -64,7 +94,6 @@ def perform_background_backup(server_data):
         db.add_history(server_id, archive_name, local_archive_path)
         rotate_backups(server_id, max_backups)
         
-        # Подсчет времени
         duration = int(time.time() - start_time)
         mins, secs = duration // 60, duration % 60
         time_str = f"{mins} мин. {secs} сек." if mins > 0 else f"{secs} сек."
@@ -72,7 +101,8 @@ def perform_background_backup(server_data):
         logging.info(f"[{name}] Авто-бэкап успешно завершен за {time_str}")
         return True
     except Exception as e:
-        logging.error(f"[{name}] Ошибка авто-бэкапа: {str(e)}")
+        ru_error = translate_error(e)
+        logging.error(f"[{name}] Ошибка авто-бэкапа: {ru_error}")
         if ssh_mgr and ssh_mgr.client and remote_archive_path:
             try:
                 ssh_mgr.client.exec_command(f"rm -f {remote_archive_path}")
@@ -92,16 +122,19 @@ class BackupThread(QThread):
         self.server_data = server_data
 
     def run(self):
-        server_id, name, host, port, username, pwd_blob, key_path, remote_path, local_path, auto, interval, max_backups, schedule_type, cron_day, cron_time = self.server_data
+        server_id, name, host, port, username, pwd_blob, key_path, remote_path, local_path, auto, interval, max_backups, schedule_type, cron_day, cron_time, *extra = self.server_data
         ssh_mgr = None
         remote_archive_path = None
-        start_time = time.time() # Начинаем замер времени
+        start_time = time.time()
         try:
             password = decrypt_password(pwd_blob) if pwd_blob else None
             ssh_mgr = SSHManager(host, port, username, password, key_path)
             
             logging.info(f"[{name}] Подключение по SSH...")
             ssh_mgr.connect()
+            
+            # Очистка мусора от прошлых сбоев перед созданием нового архива
+            ssh_mgr.client.exec_command("rm -f /tmp/*backup_*.tar.gz /tmp/restore_*.tar.gz")
             
             archive_name = f"full_backup_{int(time.time())}.tar.gz" if remote_path == "/" else f"backup_{int(time.time())}.tar.gz"
             remote_archive_path = f"/tmp/{archive_name}"
@@ -136,7 +169,6 @@ class BackupThread(QThread):
             db.add_history(server_id, archive_name, local_archive_path)
             rotate_backups(server_id, max_backups)
             
-            # Финальный расчет времени
             duration = int(time.time() - start_time)
             mins, secs = duration // 60, duration % 60
             time_str = f"{mins} мин. {secs} сек." if mins > 0 else f"{secs} сек."
@@ -145,14 +177,15 @@ class BackupThread(QThread):
             self.finished_signal.emit(True, f"Сохранен за {time_str}")
 
         except Exception as e:
-            logging.error(f"[{name}] Ошибка: {str(e)}")
+            ru_error = translate_error(e)
+            logging.error(f"[{name}] Ошибка: {ru_error}")
             if ssh_mgr and ssh_mgr.client and remote_archive_path:
                 try:
                     logging.info(f"[{name}] Экстренное удаление поврежденного архива...")
                     ssh_mgr.client.exec_command(f"rm -f {remote_archive_path}")
                 except:
                     pass
-            self.finished_signal.emit(False, str(e))
+            self.finished_signal.emit(False, ru_error)
         finally:
             if ssh_mgr and ssh_mgr.client:
                 ssh_mgr.client.close()
@@ -167,7 +200,7 @@ class RestoreThread(QThread):
         self.filepath = filepath
 
     def run(self):
-        server_id, name, host, port, username, pwd_blob, key_path, remote_path, local_path, auto, interval, max_backups, schedule_type, cron_day, cron_time = self.server_data
+        server_id, name, host, port, username, pwd_blob, key_path, remote_path, local_path, auto, interval, max_backups, schedule_type, cron_day, cron_time, *extra = self.server_data
         ssh_mgr = None
         remote_archive_path = None
         start_time = time.time()
@@ -204,13 +237,14 @@ class RestoreThread(QThread):
             self.finished_signal.emit(True, f"Файлы успешно восстановлены из бэкапа за {time_str}!")
 
         except Exception as e:
-            logging.error(f"[{name}] Ошибка восстановления: {str(e)}")
+            ru_error = translate_error(e)
+            logging.error(f"[{name}] Ошибка восстановления: {ru_error}")
             if ssh_mgr and ssh_mgr.client and remote_archive_path:
                 try:
                     ssh_mgr.client.exec_command(f"rm -f {remote_archive_path}")
                 except:
                     pass
-            self.finished_signal.emit(False, str(e))
+            self.finished_signal.emit(False, ru_error)
         finally:
             if ssh_mgr and ssh_mgr.client:
                 ssh_mgr.client.close()

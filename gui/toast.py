@@ -6,19 +6,13 @@ class Toast(QFrame):
     def __init__(self, parent, message, is_error=False):
         super().__init__(parent)
         
-        bg_color = "#1e2030"
-        accent_color = "#f7768e" if is_error else "#9ece6a"
-        title_text = "Ошибка" if is_error else "Операция успешна"
-
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {bg_color};
-                border-left: 4px solid {accent_color};
-                border-top: 1px solid #3b4261;
-                border-right: 1px solid #3b4261;
-                border-bottom: 1px solid #3b4261;
-                border-radius: 6px;
-            }}
+        # Строгий плоский дизайн
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #1e2030;
+                border: 1px solid #3b4261;
+                border-radius: 8px;
+            }
         """)
         
         shadow = QGraphicsDropShadowEffect(self)
@@ -29,18 +23,18 @@ class Toast(QFrame):
 
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(15, 12, 12, 12)
-        main_layout.setSpacing(12)
-        
-        icon_label = QLabel("❌" if is_error else "✅")
-        icon_label.setStyleSheet("background: transparent; border: none; font-size: 16px;")
-        main_layout.addWidget(icon_label, 0, Qt.AlignTop)
+        main_layout.setSpacing(10)
 
         text_layout = QVBoxLayout()
         text_layout.setSpacing(4)
         
+        # Используем синий цвет для успеха, чтобы избежать ядовитого зеленого
+        title_color = "#f7768e" if is_error else "#7aa2f7"
+        title_text = "Ошибка" if is_error else "Успешно"
+
         title_lbl = QLabel(title_text)
         title_lbl.setFont(QFont("Arial", 11, QFont.Bold))
-        title_lbl.setStyleSheet("color: white; background: transparent; border: none;")
+        title_lbl.setStyleSheet(f"color: {title_color}; background: transparent; border: none;")
         
         msg_lbl = QLabel(message)
         msg_lbl.setFont(QFont("Arial", 10))
@@ -65,60 +59,49 @@ class Toast(QFrame):
                 font-weight: bold;
                 padding: 0px; 
             }
-            QPushButton:hover {
-                color: white;
-            }
+            QPushButton:hover { color: white; }
         """)
         close_btn.clicked.connect(self.fade_out)
-        main_layout.addWidget(close_btn, 0, Qt.AlignTop)
+        main_layout.addWidget(close_btn, 0, Qt.AlignTop | Qt.AlignRight)
         
-        width = 300
+        width = 350
         self.setFixedWidth(width)
         self.adjustSize()
         height = max(self.height(), 65)
         self.resize(width, height)
         
-        # --- НОВАЯ ПОЗИЦИЯ: СНИЗУ СПРАВА ---
         parent_w = parent.width()
-        parent_h = parent.height()
+        x_pos = (parent_w - width) // 2
+        y_pos = 50 
+        start_y = -height - 20 
         
-        margin_right = 30
-        margin_bottom = 40
-        
-        y_pos = parent_h - height - margin_bottom
-        
-        # Позиции для анимации по горизонтали (выезжает справа)
-        start_x = parent_w + 10  # Начинается за правым краем окна
-        end_x = parent_w - width - margin_right # Останавливается с отступом
-        
-        self.setGeometry(start_x, y_pos, width, height)
+        self.setGeometry(x_pos, start_y, width, height)
         self.show()
         self.raise_()
         
-        # Анимация появления (движение влево)
+        if hasattr(parent, 'title_bar') and hasattr(parent.title_bar, 'add_history'):
+            parent.title_bar.add_history(title_text, message, is_error)
+        
         self.animation = QPropertyAnimation(self, b"geometry")
         self.animation.setDuration(400)
         self.animation.setEasingCurve(QEasingCurve.OutExpo)
-        self.animation.setStartValue(QRect(start_x, y_pos, width, height))
-        self.animation.setEndValue(QRect(end_x, y_pos, width, height))
+        self.animation.setStartValue(QRect(x_pos, start_y, width, height))
+        self.animation.setEndValue(QRect(x_pos, y_pos, width, height))
         self.animation.start()
         
-        self.timer = QTimer.singleShot(4000, self.fade_out)
+        self.timer = QTimer.singleShot(5000, self.fade_out)
 
     def fade_out(self):
-        if hasattr(self, 'anim_out'): 
-            return
+        if hasattr(self, 'anim_out'): return
             
-        # Анимация скрытия (движение обратно вправо)
         self.anim_out = QPropertyAnimation(self, b"geometry")
         self.anim_out.setDuration(400)
         self.anim_out.setEasingCurve(QEasingCurve.InExpo)
         current_rect = self.geometry()
-        
-        hide_x = current_rect.x() + current_rect.width() + 50 # Уводим за экран
+        hide_y = -current_rect.height() - 20 
         
         self.anim_out.setStartValue(current_rect)
-        self.anim_out.setEndValue(QRect(hide_x, current_rect.y(), current_rect.width(), current_rect.height()))
+        self.anim_out.setEndValue(QRect(current_rect.x(), hide_y, current_rect.width(), current_rect.height()))
         self.anim_out.finished.connect(self.close_toast)
         self.anim_out.start()
 

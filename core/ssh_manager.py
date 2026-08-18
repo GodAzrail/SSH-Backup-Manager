@@ -20,8 +20,19 @@ class SSHManager:
 
     def connect(self):
         if self.key_path:
-            key = paramiko.RSAKey.from_private_key_file(self.key_path)
-            self.client.connect(self.host, port=self.port, username=self.username, pkey=key, timeout=self.timeout)
+            # При использовании key_filename Paramiko сам определяет тип ключа (RSA, Ed25519, ECDSA и т.д.)
+            connect_kwargs = {
+                'hostname': self.host,
+                'port': self.port,
+                'username': self.username,
+                'key_filename': self.key_path,
+                'timeout': self.timeout
+            }
+            # Если пароль передан при выборе ключа, он используется как фраза для его расшифровки (passphrase)
+            if self.password:
+                connect_kwargs['passphrase'] = self.password
+                
+            self.client.connect(**connect_kwargs)
         else:
             self.client.connect(self.host, port=self.port, username=self.username, password=self.password, timeout=self.timeout)
 

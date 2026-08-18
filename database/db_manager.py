@@ -40,6 +40,12 @@ class DBManager:
             self.conn.commit()
         except sqlite3.OperationalError: pass
 
+        # Добавление поля типа авторизации для новых версий
+        try:
+            self.cursor.execute("ALTER TABLE servers ADD COLUMN auth_type TEXT DEFAULT 'password'")
+            self.conn.commit()
+        except sqlite3.OperationalError: pass
+
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS backup_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,19 +56,19 @@ class DBManager:
         self.cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('ssh_timeout', '10')")
         self.conn.commit()
 
-    def add_server(self, name, host, port, username, password_blob, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time):
-        self.cursor.execute('''INSERT INTO servers (name, host, port, username, password, key_path, remote_path, local_path, auto_backup, backup_interval, max_backups, schedule_type, cron_day, cron_time)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-                            (name, host, port, username, password_blob, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time))
+    def add_server(self, name, host, port, username, password_blob, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time, auth_type='password'):
+        self.cursor.execute('''INSERT INTO servers (name, host, port, username, password, key_path, remote_path, local_path, auto_backup, backup_interval, max_backups, schedule_type, cron_day, cron_time, auth_type)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
+                            (name, host, port, username, password_blob, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time, auth_type))
         self.conn.commit()
 
-    def update_server(self, server_id, name, host, port, username, password_blob, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time):
+    def update_server(self, server_id, name, host, port, username, password_blob, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time, auth_type='password'):
         if password_blob:
-            self.cursor.execute('''UPDATE servers SET name=?, host=?, port=?, username=?, password=?, key_path=?, remote_path=?, local_path=?, auto_backup=?, backup_interval=?, max_backups=?, schedule_type=?, cron_day=?, cron_time=? WHERE id=?''', 
-                                (name, host, port, username, password_blob, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time, server_id))
+            self.cursor.execute('''UPDATE servers SET name=?, host=?, port=?, username=?, password=?, key_path=?, remote_path=?, local_path=?, auto_backup=?, backup_interval=?, max_backups=?, schedule_type=?, cron_day=?, cron_time=?, auth_type=? WHERE id=?''', 
+                                (name, host, port, username, password_blob, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time, auth_type, server_id))
         else:
-            self.cursor.execute('''UPDATE servers SET name=?, host=?, port=?, username=?, key_path=?, remote_path=?, local_path=?, auto_backup=?, backup_interval=?, max_backups=?, schedule_type=?, cron_day=?, cron_time=? WHERE id=?''', 
-                                (name, host, port, username, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time, server_id))
+            self.cursor.execute('''UPDATE servers SET name=?, host=?, port=?, username=?, key_path=?, remote_path=?, local_path=?, auto_backup=?, backup_interval=?, max_backups=?, schedule_type=?, cron_day=?, cron_time=?, auth_type=? WHERE id=?''', 
+                                (name, host, port, username, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time, auth_type, server_id))
         self.conn.commit()
 
     def get_all_servers(self):

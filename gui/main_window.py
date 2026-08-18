@@ -3,7 +3,7 @@ import os
 import logging
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton, 
                              QLabel, QScrollArea, QHBoxLayout, QMessageBox, QProgressBar, 
-                             QFrame, QListWidget, QListWidgetItem, QGraphicsDropShadowEffect,
+                             QFrame, QListWidget, QListWidgetItem,
                              QSystemTrayIcon, QMenu, QAction, qApp, QStyle, QStackedWidget, QTextEdit,
                              QSizePolicy)
 from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QPropertyAnimation, QEasingCurve, QRect
@@ -30,7 +30,7 @@ QListWidget { background-color: #1e2030; border: none; outline: none; color: #a9
 QListWidget::item { padding: 15px 20px; border-radius: 8px; margin: 3px 10px; }
 QListWidget::item:selected { background-color: #3b4261; color: white; border-left: 3px solid #7aa2f7; }
 QListWidget::item:hover:!selected { background-color: #2a2d3d; }
-QPushButton { border-radius: 8px; padding: 8px 12px; font-weight: bold; border: none; }
+QPushButton { border-radius: 6px; font-weight: bold; border: none; }
 #BtnPrimary { background-color: #7aa2f7; color: #1a1b26; font-size: 13px; min-width: 150px; padding: 10px 20px; }
 #BtnPrimary:hover { background-color: #8db0f8; }
 #BtnPrimary:pressed { background-color: #6b8fd8; }
@@ -78,118 +78,147 @@ class ServerCard(QFrame):
         super().__init__()
         self.main_window = main_window 
         self.server_data = server_data
-        self.setFixedSize(300, 150) 
         
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(20)
-        shadow.setColor(Qt.black)
-        shadow.setOffset(0, 5)
-        self.setGraphicsEffect(shadow)
-        
+        self.setFixedSize(300, 140) 
         self.setStyleSheet("""
-            QFrame { background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #2a2d3d, stop: 1 #24283b); border-radius: 15px; border: 1px solid #3b4261; }
-            QFrame:hover { background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #32364a, stop: 1 #2f354d); border: 1px solid #4a5175; }
+            QFrame { background-color: #1e2030; border-radius: 8px; border: 1px solid #292e42; }
+            QFrame:hover { background-color: #24283b; border: 1px solid #3b4261; }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
+        layout.setContentsMargins(15, 12, 15, 12)
+        layout.setSpacing(6)
         
+        # --- Шапка: Аватар + Текст + Индикатор ---
         top_layout = QHBoxLayout()
         top_layout.setSpacing(12)
         
         icon = QLabel(server_data[1][:2].upper())
-        icon.setFixedSize(45, 45)
+        icon.setFixedSize(40, 40)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setFont(QFont("Arial", 14, QFont.Bold))
-        icon.setStyleSheet("QLabel { background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1, stop: 0 #ff9e64, stop: 1 #f7768e); color: #1a1b26; border-radius: 22px; font-weight: bold; min-width: 45px; max-width: 45px; min-height: 45px; max-height: 45px; }")
+        icon.setFont(QFont("Arial", 12, QFont.Bold))
+        icon.setStyleSheet("QLabel { background-color: #3b4261; color: white; border-radius: 20px; font-weight: bold; border: none; }")
         
         text_layout = QVBoxLayout()
         text_layout.setSpacing(2)
         
         name = QLabel(server_data[1])
         name.setFont(QFont("Arial", 13, QFont.Bold))
-        name.setStyleSheet("QLabel { color: white; background: transparent; border: none; }")
+        name.setStyleSheet("color: white; border: none; background: transparent;")
         
         host_info = f"{server_data[4]}@{server_data[2]}"
         if server_data[3] and int(server_data[3]) != 22:  
             host_info += f":{server_data[3]}"
         
-        sub = QLabel(f"SSH • {host_info}")
+        sub = QLabel(host_info)
         sub.setFont(QFont("Arial", 10))
-        sub.setStyleSheet("QLabel { color: #565f89; background: transparent; border: none; }")
+        sub.setStyleSheet("color: #a9b1d6; border: none; background: transparent;")
         
         auto_backup = bool(server_data[9])
+        tooltip_text = ""
+        schedule_color = "#7aa2f7"
+        
         if not auto_backup:
-            schedule_text = "Авто-бэкап: Выключен"
+            schedule_text = "Выключен"
+            schedule_color = "#565f89"
         else:
             if len(server_data) >= 15:
                 schedule_type = server_data[12]
                 if schedule_type == 'interval':
-                    schedule_text = f"Авто-бэкап: каждые {server_data[10]} мин."
+                    schedule_text = f"Каждые {server_data[10]} мин."
                 else:
-                    cron_day = server_data[13]
-                    day_map_ru = {"*": "Ежедневно", "mon": "По понедельникам", "tue": "По вторникам", "wed": "По средам", "thu": "По четвергам", "fri": "По пятницам", "sat": "По субботам", "sun": "По воскресеньям"}
-                    schedule_text = f"Авто-бэкап: {day_map_ru.get(cron_day, cron_day)} в {server_data[14]}"
+                    cron_day_str = server_data[13]
+                    tasks = [t for t in cron_day_str.split('|') if t]
+                    day_map_short = {"*": "Ежедн.", "mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс"}
+                    day_map_full = {"*": "Ежедневно", "mon": "По понедельникам", "tue": "По вторникам", "wed": "По средам", "thu": "По четвергам", "fri": "По пятницам", "sat": "По субботам", "sun": "По воскресеньям"}
+                    
+                    formatted_short, formatted_full = [], []
+                    for t in tasks:
+                        if ';' in t:
+                            d, tm = t.split(';')
+                            formatted_short.append(f"{day_map_short.get(d, d)} {tm}")
+                            formatted_full.append(f"{day_map_full.get(d, d)} в {tm}")
+                            
+                    if len(tasks) == 1 and formatted_full:
+                        schedule_text = f"{formatted_full[0]}"
+                    elif len(tasks) == 2 and formatted_short:
+                        schedule_text = f"{', '.join(formatted_short)}"
+                    elif len(tasks) > 2:
+                        schedule_text = f"{len(tasks)} расписания"
+                    else:
+                        schedule_text = "Расписание не задано"
+                        
+                    if formatted_full:
+                        tooltip_text = "Настроенные бэкапы:\n" + "\n".join([f"• {item}" for item in formatted_full])
             else:
-                schedule_text = f"Авто-бэкап: каждые {server_data[10]} мин."
+                schedule_text = f"Каждые {server_data[10]} мин."
 
         schedule_label = QLabel(schedule_text)
-        schedule_label.setFont(QFont("Arial", 9))
-        schedule_label.setStyleSheet("QLabel { color: #7aa2f7; background: transparent; border: none; }")
+        schedule_label.setFont(QFont("Arial", 10))
+        schedule_label.setStyleSheet(f"color: {schedule_color}; border: none; background: transparent;")
+        if tooltip_text:
+            schedule_label.setToolTip(tooltip_text)
+            schedule_label.setCursor(Qt.WhatsThisCursor)
 
         text_layout.addWidget(name)
         text_layout.addWidget(sub)
         text_layout.addWidget(schedule_label) 
         
-        top_layout.addWidget(icon)
-        top_layout.addLayout(text_layout)
-        top_layout.addStretch()
-        
-        self.status_dot = QLabel("●")
-        self.status_dot.setFixedSize(15, 15)
-        self.status_dot.setAlignment(Qt.AlignCenter)
+        # Индикатор вынесен в главный слой для позиционирования
+        self.status_dot = QLabel()
+        self.status_dot.setFixedSize(14, 14)
         self.set_dot_color("#565f89") 
-        top_layout.addWidget(self.status_dot)
+        
+        top_layout.addWidget(icon, alignment=Qt.AlignTop)
+        top_layout.addLayout(text_layout)
+        top_layout.addStretch(1) # Пружина отталкивает индикатор вправо
+        top_layout.addWidget(self.status_dot, alignment=Qt.AlignTop | Qt.AlignRight)
         
         self.check_thread = StatusCheckThread(self.server_data)
         self.check_thread.status_signal.connect(self.update_network_status)
         self.check_thread.start()
 
+        # --- Подвал: Кнопки действий ---
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        btn_layout.setSpacing(6)
         
         self.backup_btn = QPushButton("Бэкап")
         self.backup_btn.setCursor(Qt.PointingHandCursor)
-        self.backup_btn.setFont(QFont("Arial", 10, QFont.Bold))
+        self.backup_btn.setFont(QFont("Arial", 9, QFont.Bold))
         self.backup_btn.setStyleSheet("""
-            QPushButton { background-color: #9ece6a; color: #1a1b26; padding: 6px 10px; border-radius: 6px; min-width: 65px; }
-            QPushButton:hover { background-color: #b3df7a; }
-            QPushButton:disabled { background-color: #3b4261; color: #a9b1d6; }
+            QPushButton { background-color: #7aa2f7; color: #1a1b26; padding: 6px 12px; border-radius: 6px; font-weight: bold; border: none; }
+            QPushButton:hover { background-color: #8db0f8; }
+            QPushButton:disabled { background-color: #292e42; color: #565f89; }
         """)
         self.backup_btn.clicked.connect(self.start_backup)
 
         self.history_btn = QPushButton("История")
         self.history_btn.setCursor(Qt.PointingHandCursor)
-        self.history_btn.setFont(QFont("Arial", 10, QFont.Bold))
+        self.history_btn.setFont(QFont("Arial", 9, QFont.Bold))
         self.history_btn.setStyleSheet("""
-            QPushButton { background-color: #3b4261; color: white; padding: 6px 10px; border-radius: 6px; }
-            QPushButton:hover { background-color: #7aa2f7; color: #1a1b26; }
+            QPushButton { background-color: #3b4261; color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; border: none; }
+            QPushButton:hover { background-color: #4a5175; }
         """)
         self.history_btn.clicked.connect(lambda: history_cb(self.server_data))
         
         edit_btn = QPushButton("⚙")
         edit_btn.setCursor(Qt.PointingHandCursor)
-        edit_btn.setFixedSize(30, 30)
-        edit_btn.setFont(QFont("Arial", 14))
-        edit_btn.setStyleSheet("QPushButton { background-color: rgba(59, 66, 97, 0.5); color: #a9b1d6; border-radius: 6px; padding: 0px; } QPushButton:hover { background-color: #3b4261; color: white; }")
+        edit_btn.setFixedSize(28, 28)
+        edit_btn.setFont(QFont("Arial", 12))
+        edit_btn.setStyleSheet("""
+            QPushButton { background-color: transparent; color: #565f89; border: 1px solid transparent; border-radius: 5px; padding: 0;}
+            QPushButton:hover { background-color: rgba(86, 95, 137, 0.2); color: white; }
+        """)
         edit_btn.clicked.connect(lambda: edit_cb(self.server_data))
 
         del_btn = QPushButton("✕")
         del_btn.setCursor(Qt.PointingHandCursor)
-        del_btn.setFixedSize(30, 30)
+        del_btn.setFixedSize(28, 28)
         del_btn.setFont(QFont("Arial", 12))
-        del_btn.setStyleSheet("QPushButton { background-color: rgba(247, 118, 142, 0.2); color: #f7768e; border-radius: 6px; padding: 0px; } QPushButton:hover { background-color: #f7768e; color: #1a1b26; }")
+        del_btn.setStyleSheet("""
+            QPushButton { background-color: transparent; color: #565f89; border: 1px solid transparent; border-radius: 5px; padding: 0;}
+            QPushButton:hover { background-color: rgba(247, 118, 142, 0.2); color: #f7768e; }
+        """)
         del_btn.clicked.connect(lambda: delete_cb(self.server_data[0]))
         
         btn_layout.addWidget(self.backup_btn)
@@ -199,17 +228,28 @@ class ServerCard(QFrame):
         btn_layout.addWidget(del_btn)
         
         self.progress = QProgressBar()
-        self.progress.setFixedHeight(6)
+        self.progress.setFixedHeight(4)
         self.progress.setTextVisible(False)
         self.progress.setVisible(False)
-        self.progress.setStyleSheet("QProgressBar { background-color: #1a1b26; border-radius: 3px; border: none; } QProgressBar::chunk { background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #7aa2f7, stop: 1 #9ece6a); border-radius: 3px; }")
+        self.progress.setStyleSheet("QProgressBar { background-color: #1a1b26; border-radius: 2px; border: none; } QProgressBar::chunk { background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #7aa2f7, stop: 1 #9ece6a); border-radius: 2px; }")
 
         layout.addLayout(top_layout)
+        layout.addStretch()
         layout.addLayout(btn_layout)
         layout.addWidget(self.progress)
 
     def set_dot_color(self, color):
-        self.status_dot.setStyleSheet(f"QLabel {{ color: {color}; font-size: 12px; background: transparent; border: none; min-width: 15px; max-width: 15px; min-height: 15px; max-height: 15px; }}")
+        self.status_dot.setStyleSheet(f"""
+            QLabel {{
+                background-color: {color};
+                min-width: 14px;
+                max-width: 14px;
+                min-height: 14px;
+                max-height: 14px;
+                border-radius: 7px;
+                border: none;
+            }}
+        """)
 
     def update_network_status(self, is_online):
         color = "#9ece6a" if is_online else "#f7768e" 
@@ -245,8 +285,8 @@ class MainWindow(QMainWindow):
         
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowSystemMenuHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint)
         self.setWindowTitle("SSH Backup Manager")
-        self.resize(1650, 700)
-        self.setMinimumSize(1650, 600)
+        self.resize(1650, 900)
+        self.setMinimumSize(1650, 900)
         self.setStyleSheet(STYLESHEET)
         
         if sys.platform == "win32":
@@ -275,13 +315,12 @@ class MainWindow(QMainWindow):
         # === 1. ЛЕВЫЙ САЙДБАР ===
         sidebar_container = QWidget()
         sidebar_container.setFixedWidth(240)
-        sidebar_container.setStyleSheet("QWidget { background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 #1e2030, stop: 1 #24283b); border-right: 1px solid #3b4261; }")
+        sidebar_container.setStyleSheet("QWidget { background-color: #1e2030; border-right: 1px solid #292e42; }")
         
         sidebar_layout = QVBoxLayout(sidebar_container)
         sidebar_layout.setContentsMargins(0, 20, 0, 20)
         sidebar_layout.setSpacing(0)
         
-        # --- БЛОК С ЛОГОТИПОМ (Стиль: Крупный текст + Голубая обводка) ---
         logo_container = QWidget()
         logo_container.setStyleSheet("background: transparent; border: none;")
         logo_layout = QVBoxLayout(logo_container)
@@ -304,13 +343,11 @@ class MainWindow(QMainWindow):
         
         logo_layout.addWidget(logo_main, alignment=Qt.AlignHCenter)
         logo_layout.addWidget(logo_sub, alignment=Qt.AlignHCenter)
-        
         sidebar_layout.addWidget(logo_container)
-        # ----------------------------------------
         
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet("QFrame { color: #3b4261; background-color: #3b4261; border: none; height: 1px; margin: 15px 20px; }")
+        separator.setStyleSheet("QFrame { background-color: #292e42; border: none; height: 1px; margin: 15px 20px; }")
         sidebar_layout.addWidget(separator)
         
         self.sidebar = QListWidget()
@@ -335,61 +372,14 @@ class MainWindow(QMainWindow):
         self.btn_logs.setCursor(Qt.PointingHandCursor)
         self.btn_logs.setCheckable(True) 
         self.btn_logs.setStyleSheet("""
-            QPushButton { 
-                background-color: #1a1b26; 
-                color: #565f89; 
-                font-size: 13px; 
-                font-weight: bold; 
-                text-align: left; 
-                padding: 12px 15px; 
-                border-radius: 8px; 
-                margin: 0px 15px 15px 15px; 
-                border: 1px solid #292e42; 
-            }
-            QPushButton:hover:!checked { 
-                background-color: #24283b; 
-                color: #a9b1d6; 
-                border: 1px solid #3b4261;
-            }
-            QPushButton:checked {
-                background-color: #3b4261; 
-                color: white; 
-                border: 1px solid #3b4261;
-                border-left: 3px solid #7aa2f7; 
-                border-radius: 8px;
-            }
+            QPushButton { background-color: #1a1b26; color: #565f89; font-size: 13px; font-weight: bold; text-align: left; padding: 12px 15px; border-radius: 8px; margin: 0px 15px 15px 15px; border: 1px solid #292e42; }
+            QPushButton:hover:!checked { background-color: #24283b; color: #a9b1d6; border: 1px solid #3b4261; }
+            QPushButton:checked { background-color: #3b4261; color: white; border: 1px solid #3b4261; border-left: 3px solid #7aa2f7; border-radius: 8px; }
         """)
         self.btn_logs.clicked.connect(self.open_logs_page)
         sidebar_layout.addWidget(self.btn_logs)
         
-        # --- КРАСИВАЯ ПЛАШКА ОБНОВЛЕНИЯ ---
-        self.update_btn = QPushButton()
-        self.update_btn.setCursor(Qt.PointingHandCursor)
-        self.update_btn.setStyleSheet("""
-            QPushButton { 
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #7aa2f7, stop: 1 #9ece6a);
-                color: #1a1b26; 
-                font-weight: bold; 
-                font-size: 12px;
-                text-align: center;
-                padding: 12px 5px; 
-                border-radius: 8px; 
-                margin: 0px 15px 5px 15px; 
-            }
-            QPushButton:hover { 
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #8db0f8, stop: 1 #b3df7a); 
-            }
-            QPushButton:disabled {
-                background: #3b4261;
-                color: #a9b1d6;
-            }
-        """)
-        self.update_btn.clicked.connect(self.start_update_download)
-        self.update_btn.hide()
-        sidebar_layout.addWidget(self.update_btn)
-
-        # ТЕКУЩАЯ ВЕРСИЯ
-        self.current_version = "v1.0.1" 
+        self.current_version = "v1.0.2" 
         version_label = QLabel(self.current_version)
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("QLabel { color: #565f89; font-size: 11px; background: transparent; border: none; padding: 10px; }")
@@ -405,6 +395,10 @@ class MainWindow(QMainWindow):
 
         self.title_bar = CustomTitleBar(self)
         right_side_layout.addWidget(self.title_bar)
+        
+        # Интеграция кнопки обновления с шапкой
+        self.update_btn = self.title_bar.update_btn
+        self.update_btn.clicked.connect(self.start_update_download)
 
         content_area_widget = QWidget()
         content_area_layout = QHBoxLayout(content_area_widget)
@@ -561,7 +555,6 @@ class MainWindow(QMainWindow):
             if msg.message == 0x0084:
                 x = msg.pt.x - self.geometry().x()
                 y = msg.pt.y - self.geometry().y()
-                
                 border = 5
                 if x < border and y < border: return True, 13 
                 if x > self.width() - border and y < border: return True, 14 

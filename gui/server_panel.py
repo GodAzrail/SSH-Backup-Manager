@@ -1,25 +1,23 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QFormLayout, QLineEdit, 
-                             QPushButton, QCheckBox, QHBoxLayout, 
-                             QSpinBox, QComboBox, QTimeEdit, QStackedWidget, QLabel, QFrame,
-                             QGraphicsDropShadowEffect)
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
+                             QPushButton, QCheckBox, QSpinBox, QComboBox, 
+                             QTimeEdit, QLabel, QFrame, QGraphicsDropShadowEffect, 
+                             QRadioButton, QButtonGroup, QFileDialog, QScrollArea)
 from PyQt5.QtCore import QThread, pyqtSignal, QTime, Qt
 
-# Импортируем наш стильный Toast
 from gui.toast import Toast
-
 from core.ssh_manager import SSHManager
-from utils.encryption import encrypt_password
+from utils.encryption import encrypt_password, decrypt_password
 from database.db_manager import DBManager
 
 class SSHTestThread(QThread):
     result_signal = pyqtSignal(bool, str)
-    def __init__(self, host, port, user, password):
+    def __init__(self, host, port, user, password, key_path):
         super().__init__()
-        self.host, self.port, self.user, self.password = host, port, user, password
+        self.host, self.port, self.user, self.password, self.key_path = host, port, user, password, key_path
 
     def run(self):
         try:
-            manager = SSHManager(self.host, int(self.port), self.user, self.password)
+            manager = SSHManager(self.host, int(self.port), self.user, self.password, self.key_path)
             if manager.test_connection(): 
                 self.result_signal.emit(True, "Подключение успешно установлено!")
             else: 
@@ -27,7 +25,6 @@ class SSHTestThread(QThread):
         except Exception as e:
             self.result_signal.emit(False, f"Ошибка соединения: {str(e)}")
 
-# ОБНОВЛЕНО: Теперь наследуемся от QWidget (прозрачный контейнер)
 class ServerPanel(QWidget):
     saved_signal = pyqtSignal()
     closed_signal = pyqtSignal()
@@ -39,65 +36,78 @@ class ServerPanel(QWidget):
 
         self.setObjectName("OuterContainer")
         
-        # --- ОБНОВЛЕНО: Настройка прозрачного внешнего контейнера и стилей внутренних элементов ---
         self.setStyleSheet("""
             #OuterContainer { background: transparent; }
             #RightSidebar { 
-                background-color: #1e2030; 
-                border: 1px solid #3b4261; 
-                border-radius: 16px; 
+                background-color: #1a1b26; 
+                border: 1px solid #292e42; 
+                border-radius: 12px; 
             }
-            QLabel { color: #a9b1d6; font-size: 13px; font-weight: bold; background: transparent; border: none; }
-            QLineEdit, QSpinBox, QComboBox, QTimeEdit { background-color: #24283b; color: white; border: 1px solid #3b4261; border-radius: 6px; padding: 6px; }
-            QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QTimeEdit:focus { border: 1px solid #7aa2f7; }
+            QLabel { color: #a9b1d6; font-size: 12px; font-weight: bold; background: transparent; border: none; }
             
-            QCheckBox { color: #a9b1d6; font-weight: bold; font-size: 13px; spacing: 10px; }
-            QCheckBox::indicator { width: 18px; height: 18px; background-color: #24283b; border: 2px solid #3b4261; border-radius: 4px; }
-            QCheckBox::indicator:hover { border: 2px solid #7aa2f7; }
-            QCheckBox::indicator:checked { background-color: #9ece6a; border: 2px solid #9ece6a; }
+            QLineEdit, QSpinBox, QComboBox, QTimeEdit { 
+                background-color: #15161e; 
+                color: white; 
+                border: 1px solid #292e42; 
+                border-radius: 6px; 
+                padding: 7px 10px; 
+                font-size: 12px; 
+            }
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QTimeEdit:focus { 
+                border: 1px solid #7aa2f7; 
+                background-color: #1e2030;
+            }
             
-            QPushButton { border-radius: 6px; padding: 8px; font-weight: bold; border: none; }
-            #BtnPrimary { background-color: #7aa2f7; color: #1a1b26; }
-            #BtnPrimary:hover { background-color: #8db0f8; }
-            #BtnSuccess { background-color: #9ece6a; color: #1a1b26; }
-            #BtnSuccess:hover { background-color: #b3df7a; }
+            QCheckBox, QRadioButton { color: #a9b1d6; font-weight: bold; font-size: 12px; spacing: 6px; }
+            QCheckBox::indicator, QRadioButton::indicator { width: 16px; height: 16px; background-color: #15161e; border: 1px solid #3b4261; border-radius: 4px; }
+            QRadioButton::indicator { border-radius: 8px; }
+            QCheckBox::indicator:hover, QRadioButton::indicator:hover { border: 1px solid #7aa2f7; }
+            QCheckBox::indicator:checked, QRadioButton::indicator:checked { background-color: #7aa2f7; border: 1px solid #7aa2f7; }
+            
+            QPushButton { border-radius: 6px; padding: 8px; font-weight: bold; border: none; font-size: 12px;}
+            #BtnPrimary { background-color: #3b4261; color: white; }
+            #BtnPrimary:hover { background-color: #4a5175; }
+            #BtnSuccess { background-color: #7aa2f7; color: #1a1b26; }
+            #BtnSuccess:hover { background-color: #8db0f8; }
+            
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical { width: 4px; background: transparent; margin: 0px; }
+            QScrollBar::handle:vertical { background: #3b4261; border-radius: 2px; }
+            QScrollBar::handle:vertical:hover { background: #565f89; }
         """)
 
-        # --- ОБНОВЛЕНО: Создаем внутренний закругленный блок ---
         self.inner_frame = QFrame()
         self.inner_frame.setObjectName("RightSidebar")
-        self.inner_frame.setFixedWidth(340) # Жесткая фиксация спасает от сжимания во время анимации
+        self.inner_frame.setFixedWidth(350) 
 
-        # Добавляем тень для блока
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(25)
+        shadow.setBlurRadius(20)
         shadow.setColor(Qt.black)
-        shadow.setOffset(0, 8)
+        shadow.setOffset(0, 5)
         self.inner_frame.setGraphicsEffect(shadow)
 
-        # Располагаем внутренний блок во внешнем контейнере (с отступами)
         outer_layout = QVBoxLayout(self)
-        # Отступы: Слева: 15, Сверху: 30, Справа: 30, Снизу: 30
-        outer_layout.setContentsMargins(15, 30, 30, 30)
+        outer_layout.setContentsMargins(15, 20, 25, 20)
         outer_layout.addWidget(self.inner_frame, 0, Qt.AlignLeft)
 
         self.day_map = {"Каждый день": "*", "Понедельник": "mon", "Вторник": "tue", "Среда": "wed", "Четверг": "thu", "Пятница": "fri", "Суббота": "sat", "Воскресенье": "sun"}
         self.rev_day_map = {v: k for k, v in self.day_map.items()}
+        self.cron_rows_list = [] # Список для хранения динамических полей расписания
 
-        # Теперь главный layout привязан к INNER FRAME
         main_layout = QVBoxLayout(self.inner_frame)
         main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # 1. Шапка
+        # === 1. ШАПКА ===
         header = QHBoxLayout()
-        header.setContentsMargins(20, 20, 20, 10)
-        self.title_lbl = QLabel("Настройка сервера")
-        self.title_lbl.setStyleSheet("color: white; font-size: 18px;")
+        header.setContentsMargins(15, 15, 15, 5)
+        self.title_lbl = QLabel("Добавить сервер")
+        self.title_lbl.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
         
-        close_btn = QPushButton("→|")
-        close_btn.setFixedSize(35, 35)
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(26, 26)
         close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet("QPushButton { background: transparent; color: #f7768e; font-size: 16px; } QPushButton:hover { background: #24283b; }")
+        close_btn.setStyleSheet("QPushButton { background: transparent; color: #565f89; font-size: 14px; padding: 0;} QPushButton:hover { color: #f7768e; background: rgba(247, 118, 142, 0.1); border-radius: 13px;}")
         close_btn.clicked.connect(self.closed_signal.emit)
         
         header.addWidget(self.title_lbl)
@@ -105,67 +115,181 @@ class ServerPanel(QWidget):
         header.addWidget(close_btn)
         main_layout.addLayout(header)
 
-        # 2. Форма ввода
-        content_widget = QWidget()
-        content_widget.setStyleSheet("background: transparent;")
-        form_layout = QFormLayout(content_widget)
-        form_layout.setContentsMargins(20, 0, 20, 10)
-
+        # === 2. СКРОЛЛИРУЕМАЯ ОБЛАСТЬ (БЛОКИ) ===
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background: transparent;")
+        
+        content_layout = QVBoxLayout(self.scroll_content)
+        content_layout.setContentsMargins(15, 5, 15, 15)
+        content_layout.setSpacing(10) 
+        
+        # --- БЛОК 1: ОСНОВНЫЕ ---
+        b1, l1 = self.create_block("ОСНОВНЫЕ")
+        
         self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Название (например: Web Server)")
+        
+        row_host = QHBoxLayout()
+        row_host.setSpacing(8)
         self.host_input = QLineEdit()
+        self.host_input.setPlaceholderText("IP адрес или домен")
         self.port_input = QLineEdit("22")
+        self.port_input.setPlaceholderText("Порт")
+        self.port_input.setFixedWidth(60)
+        row_host.addWidget(self.host_input)
+        row_host.addWidget(self.port_input)
+        
+        l1.addWidget(self.name_input)
+        l1.addLayout(row_host)
+        content_layout.addWidget(b1)
+
+        # --- БЛОК 2: АВТОРИЗАЦИЯ ---
+        b2, l2 = self.create_block("АВТОРИЗАЦИЯ")
+        
         self.user_input = QLineEdit()
+        self.user_input.setPlaceholderText("Пользователь (root)")
+        l2.addWidget(self.user_input)
+        
+        auth_switch = QHBoxLayout()
+        auth_switch.setContentsMargins(2, 2, 2, 2)
+        self.radio_pass = QRadioButton("Пароль")
+        self.radio_key = QRadioButton("SSH-ключ")
+        self.radio_pass.setChecked(True)
+        self.radio_pass.toggled.connect(self.toggle_auth_mode)
+        
+        auth_switch.addWidget(self.radio_pass)
+        auth_switch.addWidget(self.radio_key)
+        auth_switch.addStretch()
+        l2.addLayout(auth_switch)
+        
+        self.pass_container = QWidget()
+        v_pass = QVBoxLayout(self.pass_container)
+        v_pass.setContentsMargins(0, 0, 0, 0)
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.remote_path_input = QLineEdit()
-        self.local_path_input = QLineEdit()
+        self.password_input.setPlaceholderText("Пароль")
+        v_pass.addWidget(self.password_input)
+        l2.addWidget(self.pass_container)
         
-        self.auto_backup_cb = QCheckBox("Автоматический бекап")
-        self.max_backups_spinbox = QSpinBox()
-        self.max_backups_spinbox.setRange(0, 100) 
+        self.key_container = QWidget()
+        v_key = QVBoxLayout(self.key_container)
+        v_key.setContentsMargins(0, 0, 0, 0)
+        v_key.setSpacing(8)
+        
+        key_row = QHBoxLayout()
+        key_row.setSpacing(8)
+        self.key_input = QLineEdit()
+        self.key_input.setPlaceholderText("Файл ключа (.pem, .key, .ppk)")
+        self.key_input.setReadOnly(True)
+        btn_browse = QPushButton("Обзор")
+        btn_browse.setCursor(Qt.PointingHandCursor)
+        btn_browse.setStyleSheet("background-color: #3b4261; color: white; padding: 7px;")
+        btn_browse.clicked.connect(self.browse_key)
+        key_row.addWidget(self.key_input)
+        key_row.addWidget(btn_browse)
+        
+        self.key_pass_input = QLineEdit()
+        self.key_pass_input.setEchoMode(QLineEdit.Password)
+        self.key_pass_input.setPlaceholderText("Пароль от ключа (если есть)")
+        
+        v_key.addLayout(key_row)
+        v_key.addWidget(self.key_pass_input)
+        self.key_container.setVisible(False)
+        l2.addWidget(self.key_container)
+        
+        content_layout.addWidget(b2)
 
-        self.schedule_type_combo = QComboBox()
-        self.schedule_type_combo.addItems(["Каждые N минут", "По расписанию"])
+        # --- БЛОК 3: ПУТИ И ПАПКИ ---
+        b3, l3 = self.create_block("СИНХРОНИЗАЦИЯ")
+        self.remote_path_input = QLineEdit()
+        self.remote_path_input.setPlaceholderText("Удаленный путь (на сервере)")
+        self.local_path_input = QLineEdit()
+        self.local_path_input.setPlaceholderText("Локальная папка (на ПК)")
+        l3.addWidget(self.remote_path_input)
+        l3.addWidget(self.local_path_input)
+        content_layout.addWidget(b3)
+
+        # --- БЛОК 4: РАСПИСАНИЕ (ОБНОВЛЕННЫЙ) ---
+        b4, l4 = self.create_block("АВТО-БЭКАП")
         
-        self.stack = QStackedWidget()
-        self.stack.setFixedHeight(35)
+        self.auto_backup_cb = QCheckBox("Включить автоматический бэкап")
+        l4.addWidget(self.auto_backup_cb)
+        
+        self.schedule_container = QWidget()
+        self.schedule_container.setVisible(False)
+        v_sched = QVBoxLayout(self.schedule_container)
+        v_sched.setContentsMargins(0, 10, 0, 0)
+        v_sched.setSpacing(12)
+        
+        row_retention = QHBoxLayout()
+        row_retention.setSpacing(10)
+        lbl_ret = QLabel("Хранить старые копии (шт):")
+        lbl_ret.setStyleSheet("color: #565f89; font-weight: normal;")
+        self.max_backups_spinbox = QSpinBox()
+        self.max_backups_spinbox.setRange(1, 100)
+        self.max_backups_spinbox.setFixedWidth(80)
+        
+        row_retention.addWidget(lbl_ret)
+        row_retention.addWidget(self.max_backups_spinbox)
+        row_retention.addStretch() 
+        v_sched.addLayout(row_retention)
+        
+        self.schedule_type_combo = QComboBox()
+        self.schedule_type_combo.addItems(["Запуск каждые N минут", "Запуск по расписанию (Cron)"])
+        v_sched.addWidget(self.schedule_type_combo)
+        
+        # 1. Контейнер Интервала (без QStackedWidget)
+        self.interval_container = QWidget()
+        h_int = QHBoxLayout(self.interval_container)
+        h_int.setContentsMargins(0, 0, 0, 0)
+        h_int.setSpacing(10)
+        lbl_int = QLabel("Интервал запуска (мин):")
+        lbl_int.setStyleSheet("color: #565f89; font-weight: normal;")
         self.interval_spinbox = QSpinBox()
         self.interval_spinbox.setRange(1, 10080)
-        self.stack.addWidget(self.interval_spinbox)
+        self.interval_spinbox.setFixedWidth(80)
+        h_int.addWidget(lbl_int)
+        h_int.addWidget(self.interval_spinbox)
+        h_int.addStretch() 
+        v_sched.addWidget(self.interval_container)
         
-        cron_widget = QWidget()
-        cron_layout = QHBoxLayout(cron_widget)
-        cron_layout.setContentsMargins(0, 0, 0, 0)
-        self.cron_day_combo = QComboBox()
-        self.cron_day_combo.addItems(list(self.day_map.keys()))
-        self.cron_time_edit = QTimeEdit()
-        self.cron_time_edit.setDisplayFormat("HH:mm")
-        cron_layout.addWidget(self.cron_day_combo)
-        cron_layout.addWidget(self.cron_time_edit)
-        self.stack.addWidget(cron_widget)
+        # 2. Контейнер Cron с динамическими полями
+        self.cron_container = QWidget()
+        self.cron_container.setVisible(False)
+        self.cron_vbox = QVBoxLayout(self.cron_container)
+        self.cron_vbox.setContentsMargins(0, 0, 0, 0)
+        self.cron_vbox.setSpacing(8)
         
-        self.schedule_type_combo.currentIndexChanged.connect(self.stack.setCurrentIndex)
+        self.cron_rows_layout = QVBoxLayout()
+        self.cron_rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.cron_rows_layout.setSpacing(8)
+        self.cron_vbox.addLayout(self.cron_rows_layout)
+        
+        self.btn_add_cron = QPushButton("+ Добавить время")
+        self.btn_add_cron.setCursor(Qt.PointingHandCursor)
+        self.btn_add_cron.setStyleSheet("QPushButton { background-color: #3b4261; color: white; padding: 6px; } QPushButton:hover { background-color: #4a5175; }")
+        self.btn_add_cron.clicked.connect(lambda: self.add_cron_row())
+        self.cron_vbox.addWidget(self.btn_add_cron)
+        
+        v_sched.addWidget(self.cron_container)
+        
+        l4.addWidget(self.schedule_container)
+        content_layout.addWidget(b4)
+        
+        self.auto_backup_cb.toggled.connect(self.schedule_container.setVisible)
+        self.schedule_type_combo.currentIndexChanged.connect(self.toggle_schedule_mode)
+        
+        content_layout.addStretch(1) 
+        self.scroll_area.setWidget(self.scroll_content)
+        main_layout.addWidget(self.scroll_area)
 
-        form_layout.addRow("Название:", self.name_input)
-        form_layout.addRow("Хост (IP):", self.host_input)
-        form_layout.addRow("Порт:", self.port_input)
-        form_layout.addRow("Юзер:", self.user_input)
-        form_layout.addRow("Пароль:", self.password_input)
-        form_layout.addRow("Путь SSH:", self.remote_path_input)
-        form_layout.addRow("Папка ПК:", self.local_path_input)
-        form_layout.addRow("Хранить шт:", self.max_backups_spinbox)
-        form_layout.addRow(self.auto_backup_cb)
-        form_layout.addRow("Режим:", self.schedule_type_combo)
-        form_layout.addRow("Время:", self.stack)
-
-        main_layout.addWidget(content_widget)
-
-        # Пружина, сдвигающая кнопки вниз
-        main_layout.addStretch(1)
-
-        # 3. Кнопки сохранения внизу
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(20, 10, 20, 20)
+        # === 3. ПОДВАЛ (ФИКСИРОВАННЫЕ КНОПКИ) ===
+        footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(15, 10, 15, 15)
+        footer_layout.setSpacing(8)
+        
         self.test_btn = QPushButton("Тест SSH")
         self.test_btn.setObjectName("BtnPrimary")
         self.test_btn.setCursor(Qt.PointingHandCursor)
@@ -176,37 +300,129 @@ class ServerPanel(QWidget):
         self.save_btn.setCursor(Qt.PointingHandCursor)
         self.save_btn.clicked.connect(self.save_server)
         
-        btn_layout.addWidget(self.test_btn)
-        btn_layout.addWidget(self.save_btn)
+        footer_layout.addWidget(self.test_btn, stretch=1)
+        footer_layout.addWidget(self.save_btn, stretch=1)
         
-        main_layout.addLayout(btn_layout)
+        main_layout.addLayout(footer_layout)
+
+    def create_block(self, title_text):
+        container = QFrame()
+        container.setStyleSheet("QFrame { background-color: #24283b; border-radius: 10px; border: none; }")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(12, 10, 12, 12)
+        layout.setSpacing(8)
+        
+        lbl = QLabel(title_text)
+        lbl.setStyleSheet("color: #565f89; font-size: 10px; font-weight: bold; text-transform: uppercase;")
+        layout.addWidget(lbl)
+        
+        return container, layout
+
+    def toggle_auth_mode(self):
+        is_key = self.radio_key.isChecked()
+        self.pass_container.setVisible(not is_key)
+        self.key_container.setVisible(is_key)
+
+    def toggle_schedule_mode(self, index):
+        self.interval_container.setVisible(index == 0)
+        self.cron_container.setVisible(index == 1)
+
+    def add_cron_row(self, day="*", time_str="00:00"):
+        """Динамическое добавление строки расписания"""
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+        
+        day_combo = QComboBox()
+        day_combo.addItems(list(self.day_map.keys()))
+        day_combo.setCurrentText(self.rev_day_map.get(day, "Каждый день"))
+        
+        time_edit = QTimeEdit()
+        time_edit.setDisplayFormat("HH:mm")
+        try:
+            h, m = map(int, time_str.split(':'))
+            time_edit.setTime(QTime(h, m))
+        except:
+            time_edit.setTime(QTime(0, 0))
+        
+        del_btn = QPushButton("✕")
+        del_btn.setFixedSize(28, 28)
+        del_btn.setCursor(Qt.PointingHandCursor)
+        del_btn.setStyleSheet("QPushButton { background-color: rgba(247, 118, 142, 0.2); color: #f7768e; border-radius: 6px; padding:0;} QPushButton:hover { background-color: #f7768e; color: #1a1b26; }")
+        
+        row_layout.addWidget(day_combo, stretch=2)
+        row_layout.addWidget(time_edit, stretch=1)
+        row_layout.addWidget(del_btn)
+        
+        self.cron_rows_layout.addWidget(row)
+        
+        row_data = (row, day_combo, time_edit)
+        self.cron_rows_list.append(row_data)
+        
+        del_btn.clicked.connect(lambda: self.remove_cron_row(row_data))
+
+    def remove_cron_row(self, row_data):
+        if len(self.cron_rows_list) > 1:
+            row_widget, _, _ = row_data
+            self.cron_rows_layout.removeWidget(row_widget)
+            row_widget.deleteLater()
+            self.cron_rows_list.remove(row_data)
+        else:
+            Toast(self.window(), "Должно быть хотя бы одно расписание!", is_error=True)
+
+    def browse_key(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Выберите SSH-ключ", "", "SSH Keys (*.pem *.key *.ppk);;All Files (*)")
+        if path:
+            self.key_input.setText(path)
 
     def clear_data(self):
         self.server_id = None
-        self.title_lbl.setText("Новый сервер")
+        self.title_lbl.setText("Добавить сервер")
         self.name_input.clear()
         self.host_input.clear()
         self.port_input.setText("22")
         self.user_input.clear()
+        
+        self.radio_pass.setChecked(True)
         self.password_input.clear()
-        self.password_input.setPlaceholderText("Пароль")
+        self.key_input.clear()
+        self.key_pass_input.clear()
+        
         self.remote_path_input.clear()
         self.local_path_input.setText(self.db.get_setting('default_backup_path', 'C:\\Backups'))
+        
         self.auto_backup_cb.setChecked(False)
         self.interval_spinbox.setValue(60)
         self.max_backups_spinbox.setValue(3)
         self.schedule_type_combo.setCurrentIndex(0)
-        self.cron_time_edit.setTime(QTime(0, 0))
+        
+        # Очищаем динамические строки и добавляем одну пустую
+        for row_widget, _, _ in self.cron_rows_list:
+            self.cron_rows_layout.removeWidget(row_widget)
+            row_widget.deleteLater()
+        self.cron_rows_list.clear()
+        self.add_cron_row()
 
     def load_data(self, data):
+        self.clear_data() # Очистим перед загрузкой, чтобы сбросить ряды cron
+        
         self.server_id = data[0]
-        self.title_lbl.setText("Настройки сервера")
+        self.title_lbl.setText("Настройки")
         self.name_input.setText(data[1])
         self.host_input.setText(data[2])
         self.port_input.setText(str(data[3]))
         self.user_input.setText(data[4])
-        self.password_input.clear()
-        self.password_input.setPlaceholderText("Пусто = не менять")
+        
+        auth_type = data[15] if len(data) >= 16 else 'password'
+        if auth_type == 'key':
+            self.radio_key.setChecked(True)
+            self.key_input.setText(data[6] if data[6] else "")
+            if data[5]: self.key_pass_input.setText(decrypt_password(data[5]))
+        else:
+            self.radio_pass.setChecked(True)
+            if data[5]: self.password_input.setText(decrypt_password(data[5]))
+            
         self.remote_path_input.setText(data[7])
         self.local_path_input.setText(data[8])
         self.auto_backup_cb.setChecked(bool(data[9]))
@@ -216,51 +432,87 @@ class ServerPanel(QWidget):
             self.max_backups_spinbox.setValue(int(data[11]))
             if data[12] == 'cron':
                 self.schedule_type_combo.setCurrentIndex(1)
-                self.cron_day_combo.setCurrentText(self.rev_day_map.get(data[13], "Каждый день"))
-                h, m = map(int, data[14].split(':'))
-                self.cron_time_edit.setTime(QTime(h, m))
+                
+                # Парсинг нового и старого форматов
+                cron_day_str = data[13]
+                
+                # Очищаем дефолтную строку, созданную в clear_data
+                for row_widget, _, _ in self.cron_rows_list:
+                    self.cron_rows_layout.removeWidget(row_widget)
+                    row_widget.deleteLater()
+                self.cron_rows_list.clear()
+
+                if "|" in cron_day_str or ";" in cron_day_str:
+                    for p in cron_day_str.split("|"):
+                        if ";" in p:
+                            d, t = p.split(";")
+                            self.add_cron_row(d, t)
+                else:
+                    self.add_cron_row(data[13], data[14])
             else:
                 self.schedule_type_combo.setCurrentIndex(0)
 
     def test_connection(self):
-        host, port, user, password = self.host_input.text(), self.port_input.text(), self.user_input.text(), self.password_input.text()
+        host, port, user = self.host_input.text().strip(), self.port_input.text().strip(), self.user_input.text().strip()
+        auth_type = 'key' if self.radio_key.isChecked() else 'password'
+        password = self.key_pass_input.text() if auth_type == 'key' else self.password_input.text()
+        key_path = self.key_input.text() if auth_type == 'key' else None
         
         if not all([host, port, user]):
             Toast(self.window(), "Заполните хост, порт и пользователя!", is_error=True)
             return
             
+        if auth_type == 'key' and not key_path:
+            Toast(self.window(), "Выберите файл ключа!", is_error=True)
+            return
+            
         self.test_btn.setEnabled(False)
         self.test_btn.setText("Проверка...")
-        self.test_thread = SSHTestThread(host, port, user, password)
+        self.test_thread = SSHTestThread(host, port, user, password, key_path)
         self.test_thread.result_signal.connect(self.on_test_finished)
         self.test_thread.start()
 
     def on_test_finished(self, success, message):
         self.test_btn.setEnabled(True)
         self.test_btn.setText("Тест SSH")
-        
         Toast(self.window(), message, is_error=not success)
 
     def save_server(self):
-        name, host, port, user = self.name_input.text(), self.host_input.text(), self.port_input.text(), self.user_input.text()
-        password, remote, local = self.password_input.text(), self.remote_path_input.text(), self.local_path_input.text()
+        name, host, port, user = self.name_input.text().strip(), self.host_input.text().strip(), self.port_input.text().strip(), self.user_input.text().strip()
+        remote, local = self.remote_path_input.text().strip(), self.local_path_input.text().strip()
         auto, interval = self.auto_backup_cb.isChecked(), self.interval_spinbox.value()
         max_backups = self.max_backups_spinbox.value() 
         schedule_type = 'interval' if self.schedule_type_combo.currentIndex() == 0 else 'cron'
-        cron_day = self.day_map[self.cron_day_combo.currentText()]
-        cron_time = self.cron_time_edit.time().toString("HH:mm")
+        
+        # Сборка составного CRON
+        cron_parts = []
+        for _, day_combo, time_edit in self.cron_rows_list:
+            c_day = self.day_map[day_combo.currentText()]
+            c_time = time_edit.time().toString("HH:mm")
+            cron_parts.append(f"{c_day};{c_time}")
+            
+        cron_day_combined = "|".join(cron_parts)
+        cron_time_combined = "" # Теперь время хранится внутри cron_day_combined
+
+        auth_type = 'key' if self.radio_key.isChecked() else 'password'
+        password = self.key_pass_input.text() if auth_type == 'key' else self.password_input.text()
+        key_path = self.key_input.text() if auth_type == 'key' else ""
 
         if not all([name, host, port, user, remote, local]):
             Toast(self.window(), "Заполните все обязательные поля!", is_error=True)
+            return
+            
+        if auth_type == 'key' and not key_path:
+            Toast(self.window(), "Выберите файл ключа!", is_error=True)
             return
         
         enc_password = encrypt_password(password) if password else b""
         
         if self.server_id: 
-            self.db.update_server(self.server_id, name, host, int(port), user, enc_password, "", remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time)
-            Toast(self.window(), "Настройки сервера обновлены!", is_error=False)
+            self.db.update_server(self.server_id, name, host, int(port), user, enc_password, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
+            Toast(self.window(), "Настройки обновлены!", is_error=False)
         else: 
-            self.db.add_server(name, host, int(port), user, enc_password, "", remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time)
-            Toast(self.window(), "Новый сервер успешно добавлен!", is_error=False)
+            self.db.add_server(name, host, int(port), user, enc_password, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
+            Toast(self.window(), "Сервер добавлен!", is_error=False)
             
         self.saved_signal.emit()
