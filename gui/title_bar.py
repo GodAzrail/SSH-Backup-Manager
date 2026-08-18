@@ -1,6 +1,14 @@
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QFrame
-from PyQt5.QtCore import Qt, QPoint
+import sys
+import os
 import datetime
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QFrame
+from PyQt5.QtCore import Qt, QPoint, QSize
+from PyQt5.QtGui import QIcon
+
+def get_resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 class NotificationItem(QFrame):
     """Карточка одного уведомления в истории колокольчика"""
@@ -128,25 +136,22 @@ class CustomTitleBar(QWidget):
 
         layout.addStretch(1)
 
-        # --- ИСПРАВЛЕННЫЙ КОЛОКОЛЬЧИК (РАБОТАЕТ КАК КНОПКИ УПРАВЛЕНИЯ) ---
-        self.btn_bell = QPushButton("🔔")
-        self.btn_bell.setFixedSize(45, 40) # Тот же размер, что у кнопок справа
+        # --- ИСПРАВЛЕННЫЙ КОЛОКОЛЬЧИК (ИКОНКА SVG) ---
+        self.btn_bell = QPushButton()
+        self.btn_bell.setIcon(QIcon(get_resource_path(os.path.join("icon", "bell.svg"))))
+        self.btn_bell.setIconSize(QSize(16, 16))
+        self.btn_bell.setFixedSize(45, 40)
         self.btn_bell.setCursor(Qt.PointingHandCursor)
         
-        # Стили полностью повторяют логику кнопок управления, иконка центрирована
         self.btn_bell.setStyleSheet("""
             QPushButton {
                 background: transparent;
                 border: none;
-                color: #a9b1d6;
-                font-size: 16px;
                 padding: 0;
                 margin: 0;
-                text-align: center;
             }
             QPushButton:hover {
                 background-color: rgba(59, 66, 97, 0.5);
-                color: white;
             }
             QPushButton:focus {
                 outline: none;
@@ -154,7 +159,7 @@ class CustomTitleBar(QWidget):
         """)
         self.btn_bell.clicked.connect(self.show_notifications)
         
-        # Индикатор новых уведомлений (прозрачен для кликов мыши)
+        # Индикатор новых уведомлений
         self.badge = QLabel(self.btn_bell)
         self.badge.setFixedSize(8, 8)
         self.badge.setStyleSheet("background-color: #f7768e; border-radius: 4px;")

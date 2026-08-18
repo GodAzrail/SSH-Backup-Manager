@@ -2,7 +2,7 @@ import os
 import sys
 import winreg
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QCheckBox, QFileDialog, QFrame, QScrollArea, QSpinBox)
+                             QPushButton, QCheckBox, QFileDialog, QFrame, QScrollArea, QSpinBox, QLineEdit)
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QFont
 
@@ -20,14 +20,12 @@ class SettingsView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(15)
         
-        # Заголовок
         header_layout = QVBoxLayout()
         title = QLabel("Настройки")
         title.setFont(QFont("Arial", 28, QFont.Bold))
         title.setStyleSheet("color: white; padding-bottom: 5px;")
         header_layout.addWidget(title)
         
-        # Прокручиваемая область
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
@@ -37,7 +35,6 @@ class SettingsView(QWidget):
         content_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         content_layout.setContentsMargins(0, 10, 20, 10)
         
-        # --- ГЛАВНЫЙ МАКЕТ: ДВЕ КОЛОНКИ ---
         columns_layout = QHBoxLayout()
         columns_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         columns_layout.setSpacing(25)
@@ -50,7 +47,7 @@ class SettingsView(QWidget):
         col_right.setAlignment(Qt.AlignTop)
         col_right.setSpacing(20)
         
-        # --- БЛОК 1: СИСТЕМА (Левая колонка) ---
+        # --- БЛОК 1: СИСТЕМА ---
         system_group = self.create_group("Системные настройки")
         
         self.cb_autostart = QCheckBox("Автозапуск вместе с Windows")
@@ -90,7 +87,7 @@ class SettingsView(QWidget):
         system_group.layout().addWidget(self.cb_start_minimized)
         system_group.layout().addLayout(interval_layout)
         
-        # --- БЛОК 2: УВЕДОМЛЕНИЯ (Левая колонка) ---
+        # --- БЛОК 2: УВЕДОМЛЕНИЯ ---
         notif_group = self.create_group("Уведомления")
         
         self.cb_notify_success = QCheckBox("Уведомления об успешных бэкапах")
@@ -106,11 +103,24 @@ class SettingsView(QWidget):
         notif_group.layout().addWidget(self.cb_notify_success)
         notif_group.layout().addWidget(self.cb_notify_error)
         
-        # --- БЛОК 3: ХРАНИЛИЩЕ (Правая колонка) ---
+        # --- БЛОК 3: ХРАНИЛИЩЕ ---
         folder_group = self.create_group("Хранилище")
         
+        # НОВОЕ: Удаленный путь по умолчанию
+        lbl_remote = QLabel("Удаленный путь по умолчанию (на сервере):")
+        lbl_remote.setStyleSheet("color: #a9b1d6; font-size: 14px; font-weight: bold;")
+        
+        self.remote_input = QLineEdit()
+        self.remote_input.setText(self.settings.value("default_remote_path", "/"))
+        self.remote_input.setStyleSheet("""
+            QLineEdit { background-color: #1a1b26; color: white; border: 1px solid #3b4261; border-radius: 6px; padding: 8px 12px; font-size: 13px;}
+            QLineEdit:focus { border: 1px solid #7aa2f7; }
+        """)
+        self.remote_input.textChanged.connect(lambda t: self.settings.setValue("default_remote_path", t))
+        
+        # Локальный путь
         lbl_folder = QLabel("Папка для сохранения бэкапов по умолчанию:")
-        lbl_folder.setStyleSheet("color: #a9b1d6; font-size: 14px; font-weight: bold;")
+        lbl_folder.setStyleSheet("color: #a9b1d6; font-size: 14px; font-weight: bold; margin-top: 10px;")
         
         folder_row = QHBoxLayout()
         folder_row.setSpacing(10)
@@ -132,13 +142,13 @@ class SettingsView(QWidget):
         folder_row.addWidget(self.lbl_path, stretch=1)
         folder_row.addWidget(btn_browse)
         
+        folder_group.layout().addWidget(lbl_remote)
+        folder_group.layout().addWidget(self.remote_input)
         folder_group.layout().addWidget(lbl_folder)
         folder_group.layout().addLayout(folder_row)
         
-        # Распределяем по колонкам
         col_left.addWidget(system_group)
         col_left.addWidget(notif_group)
-        
         col_right.addWidget(folder_group)
         
         columns_layout.addLayout(col_left, stretch=1)
@@ -151,11 +161,8 @@ class SettingsView(QWidget):
         layout.addWidget(scroll)
 
     def create_group(self, title_text):
-        """Создает стилизованную карточку"""
         group = QFrame()
-        group.setStyleSheet("""
-            QFrame { background-color: #1e2030; border-radius: 10px; border: 1px solid #292e42; }
-        """)
+        group.setStyleSheet("QFrame { background-color: #1e2030; border-radius: 10px; border: 1px solid #292e42; }")
         group_layout = QVBoxLayout(group)
         group_layout.setContentsMargins(20, 15, 20, 20)
         group_layout.setSpacing(12)

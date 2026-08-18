@@ -201,13 +201,15 @@ class ServerCard(QFrame):
         """)
         self.history_btn.clicked.connect(lambda: history_cb(self.server_data))
         
-        edit_btn = QPushButton("⚙")
+        # Иконка настроек (шестеренка)
+        edit_btn = QPushButton()
         edit_btn.setCursor(Qt.PointingHandCursor)
         edit_btn.setFixedSize(28, 28)
-        edit_btn.setFont(QFont("Arial", 12))
+        edit_btn.setIcon(QIcon(get_resource_path(os.path.join("icon", "gear.svg"))))
+        edit_btn.setIconSize(QSize(18, 18))
         edit_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; color: #565f89; border: 1px solid transparent; border-radius: 5px; padding: 0;}
-            QPushButton:hover { background-color: rgba(86, 95, 137, 0.2); color: white; }
+            QPushButton { background-color: transparent; border: 1px solid transparent; border-radius: 5px; padding: 0;}
+            QPushButton:hover { background-color: rgba(86, 95, 137, 0.2); }
         """)
         edit_btn.clicked.connect(lambda: edit_cb(self.server_data))
 
@@ -379,7 +381,7 @@ class MainWindow(QMainWindow):
         self.btn_logs.clicked.connect(self.open_logs_page)
         sidebar_layout.addWidget(self.btn_logs)
         
-        self.current_version = "v1.0.2" 
+        self.current_version = "v1.0.4" 
         version_label = QLabel(self.current_version)
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("QLabel { color: #565f89; font-size: 11px; background: transparent; border: none; padding: 10px; }")
@@ -565,7 +567,9 @@ class MainWindow(QMainWindow):
                 if y < border: return True, 12 
                 if y > self.height() - border: return True, 15 
                 
-                if 0 < y < 40 and 240 < x < self.width() - 150:
+                # ИСПРАВЛЕНО: Увеличиваем отступ до 240px, чтобы вся панель кнопок 
+                # (включая колокольчик) была активной и не перекрывалась зоной перетаскивания.
+                if 0 < y < 40 and 240 < x < self.width() - 240:
                     return True, 2 
                     
         return super().nativeEvent(eventType, message)

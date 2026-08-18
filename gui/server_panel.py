@@ -1,8 +1,10 @@
+import os
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QCheckBox, QSpinBox, QComboBox, 
                              QTimeEdit, QLabel, QFrame, QGraphicsDropShadowEffect, 
-                             QRadioButton, QButtonGroup, QFileDialog, QScrollArea)
-from PyQt5.QtCore import QThread, pyqtSignal, QTime, Qt
+                             QRadioButton, QButtonGroup, QFileDialog, QScrollArea,
+                             QTextEdit)
+from PyQt5.QtCore import QThread, pyqtSignal, QTime, Qt, QSettings
 
 from gui.toast import Toast
 from core.ssh_manager import SSHManager
@@ -25,6 +27,7 @@ class SSHTestThread(QThread):
         except Exception as e:
             self.result_signal.emit(False, f"Ошибка соединения: {str(e)}")
 
+
 class ServerPanel(QWidget):
     saved_signal = pyqtSignal()
     closed_signal = pyqtSignal()
@@ -45,7 +48,7 @@ class ServerPanel(QWidget):
             }
             QLabel { color: #a9b1d6; font-size: 12px; font-weight: bold; background: transparent; border: none; }
             
-            QLineEdit, QSpinBox, QComboBox, QTimeEdit { 
+            QLineEdit, QSpinBox, QComboBox, QTimeEdit, QTextEdit { 
                 background-color: #15161e; 
                 color: white; 
                 border: 1px solid #292e42; 
@@ -53,7 +56,7 @@ class ServerPanel(QWidget):
                 padding: 7px 10px; 
                 font-size: 12px; 
             }
-            QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QTimeEdit:focus { 
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QTimeEdit:focus, QTextEdit:focus { 
                 border: 1px solid #7aa2f7; 
                 background-color: #1e2030;
             }
@@ -70,7 +73,7 @@ class ServerPanel(QWidget):
             #BtnSuccess { background-color: #7aa2f7; color: #1a1b26; }
             #BtnSuccess:hover { background-color: #8db0f8; }
             
-            QScrollArea { border: none; background: transparent; }
+            #MainScroll { border: none; background: transparent; }
             QScrollBar:vertical { width: 4px; background: transparent; margin: 0px; }
             QScrollBar::handle:vertical { background: #3b4261; border-radius: 2px; }
             QScrollBar::handle:vertical:hover { background: #565f89; }
@@ -92,13 +95,12 @@ class ServerPanel(QWidget):
 
         self.day_map = {"Каждый день": "*", "Понедельник": "mon", "Вторник": "tue", "Среда": "wed", "Четверг": "thu", "Пятница": "fri", "Суббота": "sat", "Воскресенье": "sun"}
         self.rev_day_map = {v: k for k, v in self.day_map.items()}
-        self.cron_rows_list = [] # Список для хранения динамических полей расписания
+        self.cron_rows_list = [] 
 
         main_layout = QVBoxLayout(self.inner_frame)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # === 1. ШАПКА ===
         header = QHBoxLayout()
         header.setContentsMargins(15, 15, 15, 5)
         self.title_lbl = QLabel("Добавить сервер")
@@ -115,8 +117,8 @@ class ServerPanel(QWidget):
         header.addWidget(close_btn)
         main_layout.addLayout(header)
 
-        # === 2. СКРОЛЛИРУЕМАЯ ОБЛАСТЬ (БЛОКИ) ===
         self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("MainScroll")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background: transparent;")
@@ -173,6 +175,7 @@ class ServerPanel(QWidget):
         v_pass.addWidget(self.password_input)
         l2.addWidget(self.pass_container)
         
+        # Контейнер для SSH-ключей (Единое поле ввода)
         self.key_container = QWidget()
         v_key = QVBoxLayout(self.key_container)
         v_key.setContentsMargins(0, 0, 0, 0)
@@ -180,15 +183,17 @@ class ServerPanel(QWidget):
         
         key_row = QHBoxLayout()
         key_row.setSpacing(8)
-        self.key_input = QLineEdit()
-        self.key_input.setPlaceholderText("Файл ключа (.pem, .key, .ppk)")
-        self.key_input.setReadOnly(True)
-        btn_browse = QPushButton("Обзор")
-        btn_browse.setCursor(Qt.PointingHandCursor)
-        btn_browse.setStyleSheet("background-color: #3b4261; color: white; padding: 7px;")
-        btn_browse.clicked.connect(self.browse_key)
+        self.key_input = QTextEdit()
+        self.key_input.setPlaceholderText("Файл ключа (.pem, .key, .ppk) или текст самого ключа...")
+        self.key_input.setFixedHeight(55)
+        
+        btn_browse_key = QPushButton("Обзор")
+        btn_browse_key.setCursor(Qt.PointingHandCursor)
+        btn_browse_key.setStyleSheet("background-color: #3b4261; color: white; padding: 7px;")
+        btn_browse_key.clicked.connect(self.browse_key)
+        
         key_row.addWidget(self.key_input)
-        key_row.addWidget(btn_browse)
+        key_row.addWidget(btn_browse_key, alignment=Qt.AlignTop)
         
         self.key_pass_input = QLineEdit()
         self.key_pass_input.setEchoMode(QLineEdit.Password)
@@ -196,6 +201,7 @@ class ServerPanel(QWidget):
         
         v_key.addLayout(key_row)
         v_key.addWidget(self.key_pass_input)
+        
         self.key_container.setVisible(False)
         l2.addWidget(self.key_container)
         
@@ -205,13 +211,24 @@ class ServerPanel(QWidget):
         b3, l3 = self.create_block("СИНХРОНИЗАЦИЯ")
         self.remote_path_input = QLineEdit()
         self.remote_path_input.setPlaceholderText("Удаленный путь (на сервере)")
+        
+        # Локальная папка с кнопкой "Обзор"
+        local_row = QHBoxLayout()
+        local_row.setSpacing(8)
         self.local_path_input = QLineEdit()
         self.local_path_input.setPlaceholderText("Локальная папка (на ПК)")
+        btn_browse_local = QPushButton("Обзор")
+        btn_browse_local.setCursor(Qt.PointingHandCursor)
+        btn_browse_local.setStyleSheet("background-color: #3b4261; color: white; padding: 7px;")
+        btn_browse_local.clicked.connect(self.browse_local_path)
+        local_row.addWidget(self.local_path_input)
+        local_row.addWidget(btn_browse_local)
+        
         l3.addWidget(self.remote_path_input)
-        l3.addWidget(self.local_path_input)
+        l3.addLayout(local_row)
         content_layout.addWidget(b3)
 
-        # --- БЛОК 4: РАСПИСАНИЕ (ОБНОВЛЕННЫЙ) ---
+        # --- БЛОК 4: РАСПИСАНИЕ ---
         b4, l4 = self.create_block("АВТО-БЭКАП")
         
         self.auto_backup_cb = QCheckBox("Включить автоматический бэкап")
@@ -240,7 +257,6 @@ class ServerPanel(QWidget):
         self.schedule_type_combo.addItems(["Запуск каждые N минут", "Запуск по расписанию (Cron)"])
         v_sched.addWidget(self.schedule_type_combo)
         
-        # 1. Контейнер Интервала (без QStackedWidget)
         self.interval_container = QWidget()
         h_int = QHBoxLayout(self.interval_container)
         h_int.setContentsMargins(0, 0, 0, 0)
@@ -255,7 +271,6 @@ class ServerPanel(QWidget):
         h_int.addStretch() 
         v_sched.addWidget(self.interval_container)
         
-        # 2. Контейнер Cron с динамическими полями
         self.cron_container = QWidget()
         self.cron_container.setVisible(False)
         self.cron_vbox = QVBoxLayout(self.cron_container)
@@ -307,7 +322,8 @@ class ServerPanel(QWidget):
 
     def create_block(self, title_text):
         container = QFrame()
-        container.setStyleSheet("QFrame { background-color: #24283b; border-radius: 10px; border: none; }")
+        container.setObjectName("BlockFrame")
+        container.setStyleSheet("#BlockFrame { background-color: #24283b; border-radius: 10px; border: none; }")
         layout = QVBoxLayout(container)
         layout.setContentsMargins(12, 10, 12, 12)
         layout.setSpacing(8)
@@ -328,7 +344,6 @@ class ServerPanel(QWidget):
         self.cron_container.setVisible(index == 1)
 
     def add_cron_row(self, day="*", time_str="00:00"):
-        """Динамическое добавление строки расписания"""
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
@@ -374,7 +389,12 @@ class ServerPanel(QWidget):
     def browse_key(self):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите SSH-ключ", "", "SSH Keys (*.pem *.key *.ppk);;All Files (*)")
         if path:
-            self.key_input.setText(path)
+            self.key_input.setPlainText(path)
+
+    def browse_local_path(self):
+        path = QFileDialog.getExistingDirectory(self, "Выберите локальную папку для бэкапов")
+        if path:
+            self.local_path_input.setText(path)
 
     def clear_data(self):
         self.server_id = None
@@ -389,15 +409,18 @@ class ServerPanel(QWidget):
         self.key_input.clear()
         self.key_pass_input.clear()
         
-        self.remote_path_input.clear()
-        self.local_path_input.setText(self.db.get_setting('default_backup_path', 'C:\\Backups'))
+        settings = QSettings("GodAzrail", "SSHBackupManager")
+        default_local = settings.value("default_backup_dir", os.path.join(os.path.expanduser("~"), "SSH_Backups"))
+        default_remote = settings.value("default_remote_path", "/")
+        
+        self.remote_path_input.setText(default_remote)
+        self.local_path_input.setText(default_local)
         
         self.auto_backup_cb.setChecked(False)
         self.interval_spinbox.setValue(60)
         self.max_backups_spinbox.setValue(3)
         self.schedule_type_combo.setCurrentIndex(0)
         
-        # Очищаем динамические строки и добавляем одну пустую
         for row_widget, _, _ in self.cron_rows_list:
             self.cron_rows_layout.removeWidget(row_widget)
             row_widget.deleteLater()
@@ -405,7 +428,7 @@ class ServerPanel(QWidget):
         self.add_cron_row()
 
     def load_data(self, data):
-        self.clear_data() # Очистим перед загрузкой, чтобы сбросить ряды cron
+        self.clear_data() 
         
         self.server_id = data[0]
         self.title_lbl.setText("Настройки")
@@ -417,11 +440,21 @@ class ServerPanel(QWidget):
         auth_type = data[15] if len(data) >= 16 else 'password'
         if auth_type == 'key':
             self.radio_key.setChecked(True)
-            self.key_input.setText(data[6] if data[6] else "")
-            if data[5]: self.key_pass_input.setText(decrypt_password(data[5]))
+            key_val = data[6] if data[6] else ""
+            self.key_input.setPlainText(key_val)
+            
+            try:
+                if data[5]: self.key_pass_input.setText(decrypt_password(data[5]))
+            except Exception as e:
+                self.key_pass_input.clear()
+                print(f"Ошибка расшифровки пароля ключа: {e}")
         else:
             self.radio_pass.setChecked(True)
-            if data[5]: self.password_input.setText(decrypt_password(data[5]))
+            try:
+                if data[5]: self.password_input.setText(decrypt_password(data[5]))
+            except Exception as e:
+                self.password_input.clear()
+                print(f"Ошибка расшифровки пароля: {e}")
             
         self.remote_path_input.setText(data[7])
         self.local_path_input.setText(data[8])
@@ -433,10 +466,7 @@ class ServerPanel(QWidget):
             if data[12] == 'cron':
                 self.schedule_type_combo.setCurrentIndex(1)
                 
-                # Парсинг нового и старого форматов
                 cron_day_str = data[13]
-                
-                # Очищаем дефолтную строку, созданную в clear_data
                 for row_widget, _, _ in self.cron_rows_list:
                     self.cron_rows_layout.removeWidget(row_widget)
                     row_widget.deleteLater()
@@ -456,14 +486,15 @@ class ServerPanel(QWidget):
         host, port, user = self.host_input.text().strip(), self.port_input.text().strip(), self.user_input.text().strip()
         auth_type = 'key' if self.radio_key.isChecked() else 'password'
         password = self.key_pass_input.text() if auth_type == 'key' else self.password_input.text()
-        key_path = self.key_input.text() if auth_type == 'key' else None
+        
+        key_path = self.key_input.toPlainText().strip() if auth_type == 'key' else None
         
         if not all([host, port, user]):
             Toast(self.window(), "Заполните хост, порт и пользователя!", is_error=True)
             return
             
         if auth_type == 'key' and not key_path:
-            Toast(self.window(), "Выберите файл ключа!", is_error=True)
+            Toast(self.window(), "Укажите SSH-ключ!", is_error=True)
             return
             
         self.test_btn.setEnabled(False)
@@ -484,7 +515,6 @@ class ServerPanel(QWidget):
         max_backups = self.max_backups_spinbox.value() 
         schedule_type = 'interval' if self.schedule_type_combo.currentIndex() == 0 else 'cron'
         
-        # Сборка составного CRON
         cron_parts = []
         for _, day_combo, time_edit in self.cron_rows_list:
             c_day = self.day_map[day_combo.currentText()]
@@ -492,27 +522,27 @@ class ServerPanel(QWidget):
             cron_parts.append(f"{c_day};{c_time}")
             
         cron_day_combined = "|".join(cron_parts)
-        cron_time_combined = "" # Теперь время хранится внутри cron_day_combined
+        cron_time_combined = "" 
 
         auth_type = 'key' if self.radio_key.isChecked() else 'password'
         password = self.key_pass_input.text() if auth_type == 'key' else self.password_input.text()
-        key_path = self.key_input.text() if auth_type == 'key' else ""
+        key_path_val = self.key_input.toPlainText().strip() if auth_type == 'key' else ""
 
         if not all([name, host, port, user, remote, local]):
             Toast(self.window(), "Заполните все обязательные поля!", is_error=True)
             return
             
-        if auth_type == 'key' and not key_path:
-            Toast(self.window(), "Выберите файл ключа!", is_error=True)
+        if auth_type == 'key' and not key_path_val:
+            Toast(self.window(), "Укажите SSH-ключ!", is_error=True)
             return
         
         enc_password = encrypt_password(password) if password else b""
         
         if self.server_id: 
-            self.db.update_server(self.server_id, name, host, int(port), user, enc_password, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
+            self.db.update_server(self.server_id, name, host, int(port), user, enc_password, key_path_val, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
             Toast(self.window(), "Настройки обновлены!", is_error=False)
         else: 
-            self.db.add_server(name, host, int(port), user, enc_password, key_path, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
+            self.db.add_server(name, host, int(port), user, enc_password, key_path_val, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
             Toast(self.window(), "Сервер добавлен!", is_error=False)
             
         self.saved_signal.emit()
