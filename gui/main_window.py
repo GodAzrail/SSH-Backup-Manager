@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton,
                              QFrame, QListWidget, QListWidgetItem,
                              QSystemTrayIcon, QMenu, QAction, qApp, QStyle, QStackedWidget, QTextEdit,
                              QSizePolicy)
-from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QPropertyAnimation, QEasingCurve, QRect
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QPropertyAnimation, QEasingCurve, QRect, QPoint
 from PyQt5.QtGui import QFont, QIcon
 
 # Импортируем нашу кастомную шапку и Toast
@@ -381,7 +381,7 @@ class MainWindow(QMainWindow):
         self.btn_logs.clicked.connect(self.open_logs_page)
         sidebar_layout.addWidget(self.btn_logs)
         
-        self.current_version = "v1.0.4" 
+        self.current_version = "v1.0.3" 
         version_label = QLabel(self.current_version)
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("QLabel { color: #565f89; font-size: 11px; background: transparent; border: none; padding: 10px; }")
@@ -507,7 +507,7 @@ class MainWindow(QMainWindow):
 
     def on_update_found(self, version, url, body):
         self.update_url = url
-        self.update_btn.setText(f"🚀 Доступно обновление!\nУстановить {version}")
+        self.update_btn.setText(f"🚀 Установить обновление {version}")
         self.update_btn.show()
 
     def start_update_download(self):
@@ -529,7 +529,7 @@ class MainWindow(QMainWindow):
 
     def on_download_error(self, error_text):
         self.update_btn.setEnabled(True)
-        self.update_btn.setText("Ошибка. Повторить?")
+        self.update_btn.setText("Ошибка скачивания")
         Toast(self, f"Ошибка скачивания: {error_text}", is_error=True)
 
     def handle_sidebar(self, item):
@@ -567,9 +567,14 @@ class MainWindow(QMainWindow):
                 if y < border: return True, 12 
                 if y > self.height() - border: return True, 15 
                 
-                # ИСПРАВЛЕНО: Увеличиваем отступ до 240px, чтобы вся панель кнопок 
-                # (включая колокольчик) была активной и не перекрывалась зоной перетаскивания.
                 if 0 < y < 40 and 240 < x < self.width() - 240:
+                    # Исключаем зону кнопки обновления из зоны перетаскивания окна
+                    if self.update_btn.isVisible():
+                        btn_pos = self.update_btn.mapTo(self, QPoint(0, 0))
+                        # Если курсор мыши находится в границах кнопки по оси X
+                        if btn_pos.x() <= x <= btn_pos.x() + self.update_btn.width():
+                            return super().nativeEvent(eventType, message)
+                            
                     return True, 2 
                     
         return super().nativeEvent(eventType, message)

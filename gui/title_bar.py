@@ -117,19 +117,20 @@ class CustomTitleBar(QWidget):
 
         self.update_btn = QPushButton("🚀 Доступно обновление!")
         self.update_btn.setCursor(Qt.PointingHandCursor)
+        self.update_btn.setFixedHeight(28)
         self.update_btn.setStyleSheet("""
             QPushButton { 
-                background-color: rgba(158, 206, 106, 0.15); 
-                color: #9ece6a; 
-                border: 1px solid #9ece6a;
+                background-color: #7aa2f7; 
+                color: #1a1b26; 
+                border: none;
                 border-radius: 6px; 
-                padding: 4px 15px; 
+                padding: 0px 15px; 
                 font-weight: bold; 
                 font-size: 12px; 
-                margin: 6px 0;
             }
-            QPushButton:hover { background-color: #9ece6a; color: #1a1b26; }
-            QPushButton:disabled { background-color: #292e42; color: #a9b1d6; border: 1px solid #3b4261; }
+            QPushButton:hover { background-color: #8db0f8; }
+            QPushButton:pressed { background-color: #6b8fd8; }
+            QPushButton:disabled { background-color: #292e42; color: #565f89; }
         """)
         self.update_btn.hide()
         layout.addWidget(self.update_btn)
