@@ -1,4 +1,5 @@
 import sys
+import os
 import logging
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton, 
                              QLabel, QScrollArea, QHBoxLayout, QMessageBox, QProgressBar, 
@@ -6,7 +7,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton,
                              QSystemTrayIcon, QMenu, QAction, qApp, QStyle, QStackedWidget, QTextEdit,
                              QSizePolicy)
 from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QPropertyAnimation, QEasingCurve, QRect
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QIcon
 
 # Импортируем нашу кастомную шапку и Toast
 from gui.title_bar import CustomTitleBar
@@ -40,6 +41,11 @@ QScrollBar::handle:vertical:hover { background: #4a5175; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 """
+
+def get_resource_path(relative_path):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 class LogSignal(QObject):
     msg = pyqtSignal(str)
@@ -275,22 +281,43 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(0, 20, 0, 20)
         sidebar_layout.setSpacing(0)
         
-        logo = QLabel("SSH Backup\nManager")
-        logo.setAlignment(Qt.AlignCenter)
-        logo.setFont(QFont("Arial", 16, QFont.Bold))
-        logo.setStyleSheet("QLabel { color: white; padding: 20px; background: transparent; border: none; }")
-        sidebar_layout.addWidget(logo)
+        # --- БЛОК С ЛОГОТИПОМ (Стиль: Крупный текст + Голубая обводка) ---
+        logo_container = QWidget()
+        logo_container.setStyleSheet("background: transparent; border: none;")
+        logo_layout = QVBoxLayout(logo_container)
+        logo_layout.setContentsMargins(0, 15, 0, 15)
+        logo_layout.setSpacing(2)
+        
+        logo_main = QLabel("SSH BACKUP")
+        logo_main.setAlignment(Qt.AlignCenter)
+        font_main = QFont("Arial", 18, QFont.Bold)
+        font_main.setLetterSpacing(QFont.AbsoluteSpacing, 1)
+        logo_main.setFont(font_main)
+        logo_main.setStyleSheet("QLabel { color: white; background: transparent; border: none; }")
+        
+        logo_sub = QLabel("MANAGER")
+        logo_sub.setAlignment(Qt.AlignCenter)
+        font_sub = QFont("Arial", 11, QFont.Bold)
+        font_sub.setLetterSpacing(QFont.AbsoluteSpacing, 6)
+        logo_sub.setFont(font_sub)
+        logo_sub.setStyleSheet("QLabel { color: #00A2E8; background: transparent; border: none; }")
+        
+        logo_layout.addWidget(logo_main, alignment=Qt.AlignHCenter)
+        logo_layout.addWidget(logo_sub, alignment=Qt.AlignHCenter)
+        
+        sidebar_layout.addWidget(logo_container)
+        # ----------------------------------------
         
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet("QFrame { color: #3b4261; background-color: #3b4261; border: none; height: 1px; margin: 10px 20px; }")
+        separator.setStyleSheet("QFrame { color: #3b4261; background-color: #3b4261; border: none; height: 1px; margin: 15px 20px; }")
         sidebar_layout.addWidget(separator)
         
         self.sidebar = QListWidget()
         self.sidebar.setStyleSheet("QListWidget { background: transparent; border: none; outline: none; }")
         self.sidebar.setFixedHeight(120) 
         
-        item_hosts = QListWidgetItem("Серверы")
+        item_hosts = QListWidgetItem("Подключения")
         item_settings = QListWidgetItem("Настройки")
         
         item_hosts.setSizeHint(QSize(200, 50))
@@ -362,7 +389,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.update_btn)
 
         # ТЕКУЩАЯ ВЕРСИЯ
-        self.current_version = "v1.0.0" 
+        self.current_version = "v1.0.1" 
         version_label = QLabel(self.current_version)
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("QLabel { color: #565f89; font-size: 11px; background: transparent; border: none; padding: 10px; }")
@@ -401,14 +428,10 @@ class MainWindow(QMainWindow):
         header.setSpacing(15)
         
         title_container = QVBoxLayout()
-        title = QLabel("Серверы")
+        title = QLabel("Подключения")
         title.setFont(QFont("Arial", 28, QFont.Bold))
-        title.setStyleSheet("QLabel { color: white; background: transparent; border: none; }")
-        subtitle = QLabel("Управление вашими SSH серверами")
-        subtitle.setFont(QFont("Arial", 11))
-        subtitle.setStyleSheet("QLabel { color: #565f89; background: transparent; border: none; }")
+        title.setStyleSheet("QLabel { color: white; background: transparent; border: none; padding-bottom: 5px; }")
         title_container.addWidget(title)
-        title_container.addWidget(subtitle)
         
         header.addLayout(title_container)
         header.addStretch()
@@ -516,7 +539,7 @@ class MainWindow(QMainWindow):
     def handle_sidebar(self, item):
         self.btn_logs.setChecked(False) 
         
-        if item.text() == "Серверы":
+        if item.text() == "Подключения":
             self.content_stack.setCurrentIndex(0)
         elif item.text() == "Настройки":
             self.content_stack.setCurrentIndex(2)
@@ -623,8 +646,13 @@ class MainWindow(QMainWindow):
 
     def init_tray_icon(self):
         self.tray_icon = QSystemTrayIcon(self)
-        icon = self.style().standardIcon(QStyle.SP_DriveNetIcon)
-        self.tray_icon.setIcon(icon)
+        
+        icon_path = get_resource_path(os.path.join("icon", "icon.ico"))
+        if os.path.exists(icon_path):
+            self.tray_icon.setIcon(QIcon(icon_path))
+        else:
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_DriveNetIcon))
+            
         self.tray_icon.setToolTip("SSH Backup Manager - Работает")
 
         tray_menu = QMenu()

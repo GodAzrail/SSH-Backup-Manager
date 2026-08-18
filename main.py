@@ -1,8 +1,9 @@
 import sys
+import os
 import logging
 import ctypes
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtGui import QPalette, QColor
+from PyQt5.QtGui import QPalette, QColor, QIcon
 from PyQt5.QtCore import Qt
 from gui.main_window import MainWindow
 from core.scheduler import BackupScheduler
@@ -10,30 +11,33 @@ from core.scheduler import BackupScheduler
 # Настройка глобального логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def get_resource_path(relative_path):
+    """ Функция для правильного поиска файлов ресурсов (картинок) после сборки в exe """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
 # Глобальная переменная для хранения "замочка", чтобы сборщик мусора Python его не удалил
 _mutex_handle = None
 
 def check_already_running():
     """Проверяет, запущен ли уже экземпляр программы с помощью Windows Mutex."""
     global _mutex_handle
-    # Используем WinDLL с флажком use_last_error=True для надежного перехвата ошибки
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
-    
-    # Создаем мьютекс
     _mutex_handle = kernel32.CreateMutexW(None, False, "SSHBackupManager_Unique_Mutex_Lock")
-    
-    # Надежно получаем ошибку сразу после создания
     error_code = ctypes.get_last_error()
-    
-    # 183 (ERROR_ALREADY_EXISTS) означает, что мьютекс уже был создан другим процессом
     if error_code == 183:  
         return True
     return False
 
 def main():
+    if sys.platform == "win32":
+        myappid = 'godazrail.sshbackupmanager.1.0'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(get_resource_path(os.path.join("icon", "icon.ico"))))
     
-    # --- НАДЕЖНАЯ ЗАЩИТА ОТ ДВОЙНОГО ЗАПУСКА ---
     if check_already_running():
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Information)
@@ -48,15 +52,10 @@ def main():
         """)
         msg.exec_()
         sys.exit(0)
-    # -------------------------------------------
     
-    # КРИТИЧЕСКИ ВАЖНО ДЛЯ РАБОТЫ В ТРЕЕ:
-    # Запрещаем приложению закрываться, когда скрыто главное окно
     app.setQuitOnLastWindowClosed(False) 
-    
     app.setStyle("Fusion")
     
-    # Темная тема (базовая, для диалогов)
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor(43, 43, 43))
     palette.setColor(QPalette.WindowText, Qt.white)
@@ -77,7 +76,14 @@ def main():
     scheduler.start()
     
     window = MainWindow(scheduler)
-    window.show()
+    
+    # --- ЛОГИКА ФОНОВОГО ЗАПУСКА ---
+    # Если Windows запустила программу с флагом --minimized (из автозапуска)
+    if "--minimized" in sys.argv:
+        pass # Окно не вызывается, но программа работает в фоне (в трее)
+    else:
+        window.show() # Обычный запуск руками
+    # -------------------------------
     
     sys.exit(app.exec_())
 

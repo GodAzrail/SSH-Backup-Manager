@@ -36,8 +36,9 @@ class UpdateChecker(QThread):
                 if not download_url:
                     download_url = data.get("html_url")
 
-                if latest_version and latest_version != self.current_version and download_url:
-                    self.update_available.emit(latest_version, download_url, body)
+                from packaging import version
+                if latest_version and version.parse(latest_version) > version.parse(self.current_version):
+                 self.update_available.emit(latest_version, download_url, body)
             else:
                 self.error_occurred.emit(f"Не удалось проверить обновления (Код: {response.status_code})")
         except Exception as e:
