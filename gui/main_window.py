@@ -20,6 +20,9 @@ from core.backup_manager import BackupThread
 from core.ssh_manager import SSHManager
 from utils.encryption import decrypt_password
 
+# Импортируем модули для обновления
+from core.updater import UpdateChecker, DownloadThread, apply_update
+
 STYLESHEET = """
 QMainWindow { background-color: #1a1b26; }
 QListWidget { background-color: #1e2030; border: none; outline: none; color: #a9b1d6; font-size: 14px; font-weight: bold; padding: 10px 0px; }
@@ -283,10 +286,9 @@ class MainWindow(QMainWindow):
         separator.setStyleSheet("QFrame { color: #3b4261; background-color: #3b4261; border: none; height: 1px; margin: 10px 20px; }")
         sidebar_layout.addWidget(separator)
         
-        # --- ВЕРХНИЙ СПИСОК (только Серверы и Настройки) ---
         self.sidebar = QListWidget()
         self.sidebar.setStyleSheet("QListWidget { background: transparent; border: none; outline: none; }")
-        self.sidebar.setFixedHeight(120) # Уменьшили высоту под 2 элемента
+        self.sidebar.setFixedHeight(120) 
         
         item_hosts = QListWidgetItem("Серверы")
         item_settings = QListWidgetItem("Настройки")
@@ -300,51 +302,75 @@ class MainWindow(QMainWindow):
         self.sidebar.itemClicked.connect(self.handle_sidebar)
         
         sidebar_layout.addWidget(self.sidebar)
-        
-        # Пружина, которая толкает элементы вверх и вниз
         sidebar_layout.addStretch() 
         
-        # --- КНОПКА ЛОГОВ (внизу) ---
-        self.btn_logs = QPushButton("⌨  Консоль логов") # Добавили легкую иконку для красоты
+        self.btn_logs = QPushButton("⌨  Консоль логов") 
         self.btn_logs.setCursor(Qt.PointingHandCursor)
         self.btn_logs.setCheckable(True) 
         self.btn_logs.setStyleSheet("""
             QPushButton { 
-                background-color: #1a1b26; /* Чуть темнее фона сайдбара (углубление) */
-                color: #565f89; /* Приглушенный цвет текста, чтобы не кричало */
+                background-color: #1a1b26; 
+                color: #565f89; 
                 font-size: 13px; 
                 font-weight: bold; 
                 text-align: left; 
                 padding: 12px 15px; 
                 border-radius: 8px; 
-                margin: 0px 15px 15px 15px; /* Отступы от краев сайдбара */
-                border: 1px solid #292e42; /* Едва заметная контурная рамка */
+                margin: 0px 15px 15px 15px; 
+                border: 1px solid #292e42; 
             }
             QPushButton:hover:!checked { 
                 background-color: #24283b; 
-                color: #a9b1d6; /* При наведении текст становится ярче */
+                color: #a9b1d6; 
                 border: 1px solid #3b4261;
             }
             QPushButton:checked {
                 background-color: #3b4261; 
                 color: white; 
                 border: 1px solid #3b4261;
-                border-left: 3px solid #7aa2f7; /* Синяя полоска слева при активации */
+                border-left: 3px solid #7aa2f7; 
                 border-radius: 8px;
             }
         """)
         self.btn_logs.clicked.connect(self.open_logs_page)
         sidebar_layout.addWidget(self.btn_logs)
-        # ----------------------------
+        
+        # --- КРАСИВАЯ ПЛАШКА ОБНОВЛЕНИЯ ---
+        self.update_btn = QPushButton()
+        self.update_btn.setCursor(Qt.PointingHandCursor)
+        self.update_btn.setStyleSheet("""
+            QPushButton { 
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #7aa2f7, stop: 1 #9ece6a);
+                color: #1a1b26; 
+                font-weight: bold; 
+                font-size: 12px;
+                text-align: center;
+                padding: 12px 5px; 
+                border-radius: 8px; 
+                margin: 0px 15px 5px 15px; 
+            }
+            QPushButton:hover { 
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #8db0f8, stop: 1 #b3df7a); 
+            }
+            QPushButton:disabled {
+                background: #3b4261;
+                color: #a9b1d6;
+            }
+        """)
+        self.update_btn.clicked.connect(self.start_update_download)
+        self.update_btn.hide()
+        sidebar_layout.addWidget(self.update_btn)
 
-        version_label = QLabel("v1.0.0")
+        # ТЕКУЩАЯ ВЕРСИЯ
+        self.current_version = "v1.0.0" 
+        version_label = QLabel(self.current_version)
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("QLabel { color: #565f89; font-size: 11px; background: transparent; border: none; padding: 10px; }")
         sidebar_layout.addWidget(version_label)
 
         root_layout.addWidget(sidebar_container)
 
-        # === 2. ПРАВАЯ ЧАСТЬ (Шапка + Контент) ===
+        # === 2. ПРАВАЯ ЧАСТЬ ===
         right_side_widget = QWidget()
         right_side_layout = QVBoxLayout(right_side_widget)
         right_side_layout.setContentsMargins(0, 0, 0, 0)
@@ -453,10 +479,41 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(right_side_widget)
         
         self.load_servers()
+        self.check_for_updates() 
 
-    # --- ЛОГИКА НАВИГАЦИИ (ОБНОВЛЕНО) ---
+    def check_for_updates(self):
+        self.checker = UpdateChecker(current_version=self.current_version, owner="GodAzrail", repo="SSH-Backup-Manager")
+        self.checker.update_available.connect(self.on_update_found)
+        self.checker.start()
+
+    def on_update_found(self, version, url, body):
+        self.update_url = url
+        self.update_btn.setText(f"🚀 Доступно обновление!\nУстановить {version}")
+        self.update_btn.show()
+
+    def start_update_download(self):
+        self.update_btn.setEnabled(False)
+        self.update_btn.setText("Скачивание... 0%")
+        
+        self.downloader = DownloadThread(self.update_url)
+        self.downloader.progress.connect(self.update_download_progress)
+        self.downloader.finished.connect(self.on_download_complete)
+        self.downloader.error.connect(self.on_download_error)
+        self.downloader.start()
+
+    def update_download_progress(self, percent):
+        self.update_btn.setText(f"Скачивание... {percent}%")
+
+    def on_download_complete(self, filepath):
+        self.update_btn.setText("Установка...")
+        apply_update(filepath)
+
+    def on_download_error(self, error_text):
+        self.update_btn.setEnabled(True)
+        self.update_btn.setText("Ошибка. Повторить?")
+        Toast(self, f"Ошибка скачивания: {error_text}", is_error=True)
+
     def handle_sidebar(self, item):
-        # Если кликнули на верхний список - отключаем подсветку кнопки логов
         self.btn_logs.setChecked(False) 
         
         if item.text() == "Серверы":
@@ -465,11 +522,9 @@ class MainWindow(QMainWindow):
             self.content_stack.setCurrentIndex(2)
 
     def open_logs_page(self):
-        # Если кликнули на кнопку логов - снимаем выделение с верхнего списка
         self.sidebar.clearSelection() 
         self.btn_logs.setChecked(True)
         self.content_stack.setCurrentIndex(1)
-    # ------------------------------------
 
     def nativeEvent(self, eventType, message):
         if sys.platform == "win32" and eventType == b"windows_generic_MSG":
