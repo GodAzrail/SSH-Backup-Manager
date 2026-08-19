@@ -86,7 +86,7 @@ class CustomTitleBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_window = parent
-        self.setFixedHeight(40)
+        self.setFixedHeight(42)
         self.setStyleSheet("""
             QWidget {
                 background-color: transparent;

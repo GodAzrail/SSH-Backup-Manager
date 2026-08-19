@@ -35,6 +35,10 @@ def main():
         myappid = 'godazrail.sshbackupmanager.1.0'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
+    # ИСПРАВЛЕНИЕ: Устанавливаем атрибут до инициализации QApplication
+    # Это решает ошибку "Qt WebEngine seems to be initialized from a plugin"
+    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(get_resource_path(os.path.join("icon", "icon.ico"))))
     

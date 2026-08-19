@@ -19,6 +19,10 @@ class SSHManager:
         self.timeout = int(db.get_setting('ssh_timeout', 10))
 
     def connect(self):
+        # Оптимизация: если уже подключены, не подключаемся заново
+        if self.client.get_transport() and self.client.get_transport().is_active():
+            return
+
         connect_kwargs = {
             'hostname': self.host,
             'port': self.port,
@@ -30,12 +34,9 @@ class SSHManager:
             if self.password:
                 connect_kwargs['passphrase'] = self.password
             
-            # Проверяем, является ли содержимое сырым текстом ключа
             if "PRIVATE KEY" in self.key_path:
                 key_file = io.StringIO(self.key_path)
                 pkey = None
-                
-                # Перебираем форматы ключей для расшифровки
                 for key_class in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.DSSKey):
                     try:
                         key_file.seek(0)
@@ -43,15 +44,12 @@ class SSHManager:
                         break
                     except Exception:
                         pass
-                        
                 if pkey:
                     connect_kwargs['pkey'] = pkey
                 else:
-                    raise ValueError("Не удалось расшифровать или распознать формат текста приватного ключа.")
+                    raise ValueError("Не удалось расшифровать приватный ключ.")
             else:
-                # Иначе воспринимаем как путь к файлу
                 connect_kwargs['key_filename'] = self.key_path
-                
         else:
             connect_kwargs['password'] = self.password
             
@@ -66,3 +64,11 @@ class SSHManager:
         except Exception as e:
             logging.error(f"Ошибка подключения к {self.host}: {str(e)}")
             return False
+
+    def invoke_shell(self):
+        """Открывает интерактивную оболочку для терминала"""
+        self.connect()
+        # Запрашиваем псевдо-терминал с поддержкой цвета
+        channel = self.client.invoke_shell(term='xterm-256color')
+        channel.setblocking(False) # Неблокирующий режим для потокового чтения
+        return channel

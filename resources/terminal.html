@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@4.19.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@4.19.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.5.0/lib/xterm-addon-fit.js"></script>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <style>
+        body { margin: 0; padding: 10px; background-color: #1a1b26; height: 100vh; overflow: hidden; box-sizing: border-box; }
+        #terminal { height: 100%; width: 100%; }
+        .xterm-viewport { overflow-y: auto !important; }
+    </style>
+</head>
+<body>
+    <div id="terminal"></div>
+    <script>
+        var term = new Terminal({
+            theme: { background: '#1a1b26', foreground: '#a9b1d6', cursor: '#7aa2f7', cursorBlink: true },
+            fontFamily: 'Consolas, "Courier New", monospace', 
+            fontSize: 14
+        });
+        
+        var fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('terminal'));
+        fitAddon.fit();
+
+        window.addEventListener('resize', () => { fitAddon.fit(); });
+
+        // Буфер для данных, которые пришли до инициализации моста
+        window.isReady = false;
+        window.messageQueue = [];
+
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            window.pybridge = channel.objects.bridge;
+            term.onData(e => { 
+                if (window.pybridge) {
+                    window.pybridge.send_data(e); 
+                }
+            });
+            
+            window.isReady = true;
+            // Выводим все, что накопилось в очереди
+            window.messageQueue.forEach(msg => term.write(msg));
+            window.messageQueue = [];
+        });
+
+        // Безопасная функция записи с поддержкой очереди
+        function writeTerm(data) {
+            if (window.isReady) {
+                term.write(data);
+            } else {
+                window.messageQueue.push(data);
+            }
+        }
+    </script>
+</body>
+</html>

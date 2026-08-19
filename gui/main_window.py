@@ -3,7 +3,7 @@ import os
 import logging
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton, 
                              QLabel, QScrollArea, QHBoxLayout, QMessageBox, QProgressBar, 
-                             QFrame, QListWidget, QListWidgetItem,
+                             QFrame, QListWidget, QListWidgetItem, QTabWidget, QTabBar,
                              QSystemTrayIcon, QMenu, QAction, qApp, QStyle, QStackedWidget, QTextEdit,
                              QSizePolicy)
 from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QPropertyAnimation, QEasingCurve, QRect, QPoint, QTimer, QSettings
@@ -16,33 +16,94 @@ from database.db_manager import DBManager
 from gui.server_panel import ServerPanel 
 from gui.history_window import HistoryView, FlowWidget 
 from gui.settings_dialog import SettingsView
+
 from core.backup_manager import BackupThread, global_signals
 from core.ssh_manager import SSHManager
 from utils.encryption import decrypt_password
 from core.updater import UpdateChecker, DownloadThread, apply_update
 
-STYLESHEET = """
-QMainWindow { background-color: #1a1b26; }
-QListWidget { background-color: #1e2030; border: none; outline: none; color: #a9b1d6; font-size: 14px; font-weight: bold; padding: 10px 0px; }
-QListWidget::item { padding: 15px 20px; border-radius: 8px; margin: 3px 10px; }
-QListWidget::item:selected { background-color: #3b4261; color: white; border-left: 3px solid #7aa2f7; }
-QListWidget::item:hover:!selected { background-color: #2a2d3d; }
-QPushButton { border-radius: 6px; font-weight: bold; border: none; }
-#BtnPrimary { background-color: #7aa2f7; color: #1a1b26; font-size: 13px; min-width: 150px; padding: 10px 20px; }
-#BtnPrimary:hover { background-color: #8db0f8; }
-#BtnPrimary:pressed { background-color: #6b8fd8; }
-QScrollArea { border: none; background: transparent; }
-QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
-QScrollBar::handle:vertical { background: #3b4261; border-radius: 4px; min-height: 30px; }
-QScrollBar::handle:vertical:hover { background: #4a5175; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-"""
 
 def get_resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
+
+def get_stylesheet():
+    # ИСПРАВЛЕНИЕ: Формируем абсолютный путь к иконке закрытия так же, как для колокольчика
+    close_icon_path = get_resource_path(os.path.join("icos", "x.svg")).replace("\\", "/")
+    if not os.path.exists(close_icon_path):
+        close_icon_path = get_resource_path(os.path.join("icon", "x.svg")).replace("\\", "/")
+        
+    if os.path.exists(close_icon_path):
+        close_btn_css = f"image: url('{close_icon_path}');"
+    else:
+        close_btn_css = "" 
+
+    return f"""
+    /* Темный фон для всей верхней полосы (само окно) */
+    QMainWindow {{ background-color: #0d0f17; }} 
+
+    /* Светлый фон контенту под вкладками */
+    QTabWidget::pane {{ 
+        border: none; 
+        background-color: #1a1b26; 
+        top: 0px;
+    }}
+    QWidget#DashboardContainer {{ background-color: #1a1b26; }}
+
+    QTabBar {{ background-color: #0d0f17; }} 
+    QTabBar::tab {{ 
+        background: #161824; 
+        color: #565f89; 
+        padding: 8px 15px; 
+        border-radius: 8px; 
+        margin: 8px 4px 8px 5px; 
+        font-weight: bold; 
+        font-family: Arial; 
+        font-size: 13px;
+        min-width: 120px;
+        border: none;
+        height: 15px;
+        
+    }}
+    QTabBar::tab:selected {{ 
+        background: #24283b; 
+        color: white; 
+    }}
+    QTabBar::tab:hover:!selected {{ 
+        background: #1c1e2b; 
+        color: #a9b1d6; 
+    }}
+ 
+      
+    /* Кастомная иконка закрытия вкладки (крестик) */
+    QTabBar::close-button {{
+        {close_btn_css}
+        background: transparent;
+        padding: 2px;
+        border-radius: 4px;
+        
+    }}
+    QTabBar::close-button:hover {{
+        background: rgba(247, 118, 142, 0.2);
+    }}
+
+    /* ОСТАЛЬНЫЕ ЭЛЕМЕНТЫ */
+    QListWidget {{ background-color: #1e2030; border: none; outline: none; color: #a9b1d6; font-size: 14px; font-weight: bold; padding: 10px 0px; }}
+    QListWidget::item {{ padding: 15px 20px; border-radius: 8px; margin: 3px 10px; }}
+    QListWidget::item:selected {{ background-color: #3b4261; color: white; border-left: 3px solid #7aa2f7; }}
+    QListWidget::item:hover:!selected {{ background-color: #2a2d3d; }}
+    QPushButton {{ border-radius: 6px; font-weight: bold; border: none; }}
+    #BtnPrimary {{ background-color: #7aa2f7; color: #1a1b26; font-size: 13px; min-width: 150px; padding: 10px 20px; }}
+    #BtnPrimary:hover {{ background-color: #8db0f8; }}
+    #BtnPrimary:pressed {{ background-color: #6b8fd8; }}
+    QScrollArea {{ border: none; background: transparent; }}
+    QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
+    QScrollBar::handle:vertical {{ background: #3b4261; border-radius: 4px; min-height: 30px; }}
+    QScrollBar::handle:vertical:hover {{ background: #4a5175; }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+    """
 
 class LogSignal(QObject):
     msg = pyqtSignal(str)
@@ -76,7 +137,7 @@ class ServerCard(QFrame):
         self.main_window = main_window 
         self.server_data = server_data
         
-        self.setFixedSize(300, 160) # Увеличили высоту для текста скорости
+        self.setFixedSize(300, 160) 
         self.setStyleSheet("""
             QFrame { background-color: #1e2030; border-radius: 8px; border: 1px solid #292e42; }
             QFrame:hover { background-color: #24283b; border: 1px solid #3b4261; }
@@ -166,7 +227,7 @@ class ServerCard(QFrame):
         
         top_layout.addWidget(icon, alignment=Qt.AlignTop)
         top_layout.addLayout(text_layout)
-        top_layout.addStretch(1)
+        top_layout.addStretch(1) 
         top_layout.addWidget(self.status_dot, alignment=Qt.AlignTop | Qt.AlignRight)
         
         self.check_thread = StatusCheckThread(self.server_data)
@@ -200,6 +261,16 @@ class ServerCard(QFrame):
         """)
         self.history_btn.clicked.connect(lambda: history_cb(self.server_data))
         
+        self.shell_btn = QPushButton(">_")
+        self.shell_btn.setCursor(Qt.PointingHandCursor)
+        self.shell_btn.setToolTip("Открыть терминал")
+        self.shell_btn.setFont(QFont("Consolas", 11, QFont.Bold))
+        self.shell_btn.setStyleSheet("""
+            QPushButton { background-color: #24283b; color: #7aa2f7; padding: 6px 12px; border-radius: 6px; font-weight: bold; border: 1px solid #3b4261; }
+            QPushButton:hover { background-color: #3b4261; color: white; border: 1px solid #7aa2f7; }
+        """)
+        self.shell_btn.clicked.connect(lambda: self.main_window.open_terminal(self.server_data))
+        
         edit_btn = QPushButton()
         edit_btn.setCursor(Qt.PointingHandCursor)
         edit_btn.setFixedSize(28, 28)
@@ -223,11 +294,11 @@ class ServerCard(QFrame):
         
         btn_layout.addWidget(self.backup_btn)
         btn_layout.addWidget(self.history_btn)
+        btn_layout.addWidget(self.shell_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(edit_btn)
         btn_layout.addWidget(del_btn)
         
-        # Текст статуса бэкапа и прогресс-бар
         self.progress_text = QLabel("")
         self.progress_text.setFont(QFont("Arial", 9))
         self.progress_text.setStyleSheet("color: #a9b1d6; background: transparent; border: none;")
@@ -313,7 +384,6 @@ class ServerCard(QFrame):
         self.progress_text.setText("")
         Toast(self.main_window, msg, is_error=not success)
 
-
 class MainWindow(QMainWindow):
     def __init__(self, scheduler):
         super().__init__()
@@ -323,7 +393,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("SSH Backup Manager")
         self.resize(1650, 900)
         self.setMinimumSize(1650, 900)
-        self.setStyleSheet(STYLESHEET)
+        
+        self.setStyleSheet(get_stylesheet())
         
         if sys.platform == "win32":
             import ctypes
@@ -344,11 +415,58 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        root_layout = QHBoxLayout(central_widget)
+        root_layout = QVBoxLayout(central_widget)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # === 1. ЛЕВЫЙ САЙДБАР ===
+        # 1. ГЛОБАЛЬНЫЕ ВКЛАДКИ
+        self.main_tabs = QTabWidget()
+        self.main_tabs.setTabsClosable(True)
+        self.main_tabs.tabCloseRequested.connect(self.close_tab)
+        
+        # 2. ШАПКА ОКНА (Интегрируется в правый угол панели вкладок)
+        self.title_bar = CustomTitleBar(self)
+        self.title_bar.setObjectName("AppTitleBarContainer")
+        self.title_bar.setFixedHeight(40) # Фиксируем высоту шапки
+        
+        # ИСПРАВЛЕНИЕ: Стили кнопок управления окном в точности как у колокольчика[cite: 3]
+        self.title_bar.setStyleSheet("""
+            QWidget#AppTitleBarContainer { 
+                background: transparent; 
+            }
+            QPushButton { 
+                background: transparent; 
+                border: none; 
+                color: #a9b1d6;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0px;
+                margin: 0px;
+            }
+            QPushButton:hover { 
+                background-color: rgba(59, 66, 97, 0.5); 
+                color: white;
+            }
+            QPushButton#BtnClose:hover {
+                background-color: #f7768e;
+                color: #1a1b26;
+            }
+        """) 
+        
+        self.update_btn = self.title_bar.update_btn
+        self.update_btn.clicked.connect(self.start_update_download)
+
+        self.main_tabs.setCornerWidget(self.title_bar, Qt.TopRightCorner)
+        root_layout.addWidget(self.main_tabs)
+
+        # --- СОЗДАЕМ ГЛАВНУЮ ПАНЕЛЬ (ВКЛАДКА 0) ---
+        self.dashboard_widget = QWidget()
+        self.dashboard_widget.setObjectName("DashboardContainer")
+        dashboard_layout = QHBoxLayout(self.dashboard_widget)
+        dashboard_layout.setContentsMargins(0, 0, 0, 0)
+        dashboard_layout.setSpacing(0)
+
+        # === ЛЕВЫЙ САЙДБАР ===
         sidebar_container = QWidget()
         sidebar_container.setFixedWidth(240)
         sidebar_container.setStyleSheet("QWidget { background-color: #1e2030; border-right: 1px solid #292e42; }")
@@ -392,7 +510,6 @@ class MainWindow(QMainWindow):
         
         item_hosts = QListWidgetItem("Подключения")
         item_settings = QListWidgetItem("Настройки")
-        
         item_hosts.setSizeHint(QSize(200, 50))
         item_settings.setSizeHint(QSize(200, 50))
         
@@ -415,26 +532,15 @@ class MainWindow(QMainWindow):
         self.btn_logs.clicked.connect(self.open_logs_page)
         sidebar_layout.addWidget(self.btn_logs)
         
-        self.current_version = "v1.0.4" 
+        self.current_version = "v1.0.5" 
         version_label = QLabel(self.current_version)
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("QLabel { color: #565f89; font-size: 11px; background: transparent; border: none; padding: 10px; }")
         sidebar_layout.addWidget(version_label)
 
-        root_layout.addWidget(sidebar_container)
+        dashboard_layout.addWidget(sidebar_container)
 
-        # === 2. ПРАВАЯ ЧАСТЬ ===
-        right_side_widget = QWidget()
-        right_side_layout = QVBoxLayout(right_side_widget)
-        right_side_layout.setContentsMargins(0, 0, 0, 0)
-        right_side_layout.setSpacing(0)
-
-        self.title_bar = CustomTitleBar(self)
-        right_side_layout.addWidget(self.title_bar)
-        
-        self.update_btn = self.title_bar.update_btn
-        self.update_btn.clicked.connect(self.start_update_download)
-
+        # === ПРАВАЯ ЧАСТЬ ГЛАВНОЙ ПАНЕЛИ (Контент) ===
         content_area_widget = QWidget()
         content_area_layout = QHBoxLayout(content_area_widget)
         content_area_layout.setContentsMargins(0, 0, 0, 0)
@@ -442,12 +548,13 @@ class MainWindow(QMainWindow):
 
         content_wrapper = QWidget()
         content_layout = QVBoxLayout(content_wrapper)
-        content_layout.setContentsMargins(30, 10, 30, 30) 
+        content_layout.setContentsMargins(30, 20, 30, 30) 
         content_layout.setSpacing(20)
 
         self.content_stack = QStackedWidget()
         content_layout.addWidget(self.content_stack)
 
+        # Страница 0: Серверы
         self.servers_page = QWidget()
         servers_layout = QVBoxLayout(self.servers_page)
         servers_layout.setContentsMargins(0, 0, 0, 0)
@@ -491,6 +598,7 @@ class MainWindow(QMainWindow):
         servers_layout.addWidget(self.scroll)
         self.content_stack.addWidget(self.servers_page) 
         
+        # Страница 1: Логи
         self.logs_page = QWidget()
         logs_layout = QVBoxLayout(self.logs_page)
         logs_layout.setContentsMargins(0, 0, 0, 0)
@@ -515,6 +623,7 @@ class MainWindow(QMainWindow):
         logs_layout.addWidget(self.log_console)
         self.content_stack.addWidget(self.logs_page)
         
+        # Страница 2: Настройки
         self.settings_page = SettingsView(self.scheduler, self)
         self.content_stack.addWidget(self.settings_page)
 
@@ -526,12 +635,39 @@ class MainWindow(QMainWindow):
 
         content_area_layout.addWidget(content_wrapper)
         content_area_layout.addWidget(self.right_panel)
+        dashboard_layout.addWidget(content_area_widget)
 
-        right_side_layout.addWidget(content_area_widget)
-        root_layout.addWidget(right_side_widget)
-        
+        self.main_tabs.addTab(self.dashboard_widget, "Главная")
+        self.main_tabs.tabBar().setTabButton(0, QTabBar.RightSide, None)
+        self.main_tabs.tabBar().setTabButton(0, QTabBar.LeftSide, None)
+
         self.load_servers()
         self.check_for_updates() 
+
+    def open_terminal(self, server_data):
+        try:
+            from core.ssh_manager import SSHManager
+            from utils.encryption import decrypt_password
+            from gui.terminal_tab import TerminalSession
+            
+            pwd_blob = server_data[5]
+            password = decrypt_password(pwd_blob) if pwd_blob else None
+            ssh_manager = SSHManager(server_data[2], server_data[3], server_data[4], password, server_data[6])
+            
+            session = TerminalSession(ssh_manager)
+            index = self.main_tabs.addTab(session, f">_ {server_data[1]}")
+            self.main_tabs.setCurrentIndex(index)
+            
+        except Exception as e:
+            Toast(self, f"Ошибка создания сессии терминала: {e}", is_error=True)
+
+    def close_tab(self, index):
+        if index == 0: return 
+        
+        widget = self.main_tabs.widget(index)
+        if widget:
+            widget.close()
+            self.main_tabs.removeTab(index)
 
     def update_network_timers(self, new_interval):
         for card in self.flow_widget.findChildren(ServerCard):
@@ -544,7 +680,7 @@ class MainWindow(QMainWindow):
 
     def on_update_found(self, version, url, body):
         self.update_url = url
-        self.update_btn.setText(f"🚀 Установить обновление {version}")
+        self.update_btn.setText(f"Установить обновление {version}")
         self.update_btn.show()
 
     def start_update_download(self):
@@ -571,7 +707,6 @@ class MainWindow(QMainWindow):
 
     def handle_sidebar(self, item):
         self.btn_logs.setChecked(False) 
-        
         if item.text() == "Подключения":
             self.content_stack.setCurrentIndex(0)
         elif item.text() == "Настройки":
@@ -595,6 +730,7 @@ class MainWindow(QMainWindow):
                 x = msg.pt.x - self.geometry().x()
                 y = msg.pt.y - self.geometry().y()
                 border = 5
+                
                 if x < border and y < border: return True, 13 
                 if x > self.width() - border and y < border: return True, 14 
                 if x < border and y > self.height() - border: return True, 16 
@@ -604,10 +740,21 @@ class MainWindow(QMainWindow):
                 if y < border: return True, 12 
                 if y > self.height() - border: return True, 15 
                 
-                if 0 < y < 40 and 240 < x < self.width() - 240:
-                    if self.update_btn.isVisible():
-                        btn_pos = self.update_btn.mapTo(self, QPoint(0, 0))
-                        if btn_pos.x() <= x <= btn_pos.x() + self.update_btn.width():
+                if 0 < y < 45:
+                    if hasattr(self, 'update_btn') and self.update_btn.isVisible():
+                        btn_pos = self.update_btn.mapToGlobal(QPoint(0, 0))
+                        if btn_pos.x() <= msg.pt.x <= btn_pos.x() + self.update_btn.width():
+                            return super().nativeEvent(eventType, message)
+                            
+                    if hasattr(self, 'main_tabs'):
+                        tab_bar = self.main_tabs.tabBar()
+                        tab_pos = tab_bar.mapFromGlobal(QPoint(msg.pt.x, msg.pt.y))
+                        if tab_bar.tabAt(tab_pos) != -1:
+                            return super().nativeEvent(eventType, message)
+                            
+                    if hasattr(self, 'title_bar'):
+                        local_pos = self.title_bar.mapFromGlobal(QPoint(msg.pt.x, msg.pt.y))
+                        if self.title_bar.rect().contains(local_pos):
                             return super().nativeEvent(eventType, message)
                             
                     return True, 2 
