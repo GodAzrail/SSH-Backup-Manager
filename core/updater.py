@@ -2,9 +2,12 @@ import os
 import sys
 import subprocess
 import tempfile
+import logging
 import requests
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QApplication
+
+logger = logging.getLogger(__name__)
 
 class UpdateChecker(QThread):
     update_available = pyqtSignal(str, str, str)
@@ -38,7 +41,7 @@ class UpdateChecker(QThread):
 
                 from packaging import version
                 if latest_version and version.parse(latest_version) > version.parse(self.current_version):
-                 self.update_available.emit(latest_version, download_url, body)
+                    self.update_available.emit(latest_version, download_url, body)
             else:
                 self.error_occurred.emit(f"Не удалось проверить обновления (Код: {response.status_code})")
         except Exception as e:
@@ -73,40 +76,54 @@ class DownloadThread(QThread):
             self.error.emit(str(e))
 
 def apply_update(installer_path):
-    """
-    Создает временный скрипт для 100% надежного закрытия, 
-    установки и последующего запуска приложения.
-    """
     try:
-        # Получаем абсолютный путь к нашему запущенному .exe файлу
         if getattr(sys, 'frozen', False):
             exe_path = sys.executable
         else:
             exe_path = os.path.abspath(sys.argv[0])
+            
+        exe_dir = os.path.dirname(exe_path)
+        
+        logger.info(f"Updater: Application executable path: {exe_path}")
+        logger.info(f"Updater: Installer path: {installer_path}")
 
         bat_path = os.path.join(tempfile.gettempdir(), "ssh_updater.bat")
         
-        # Пишем скрипт-обновлятор
         with open(bat_path, "w", encoding="utf-8") as f:
             f.write('@echo off\n')
-            # Ждем 2 секунды, чтобы Python точно успел выгрузиться из памяти
+            f.write('title SSH Backup Manager Updater\n')
+            f.write('echo Updating SSH Backup Manager...\n')
+            # ИСПРАВЛЕНИЕ: Гарантируем запуск из директории программы, а не из temp!
+            f.write(f'cd /d "{exe_dir}"\n')
             f.write('ping 127.0.0.1 -n 3 > nul\n')
-            # Запускаем установщик и ЖДЕМ его завершения (start /wait)
             f.write(f'start /wait "" "{installer_path}" /SILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS\n')
-            # После установки запускаем саму программу
-            f.write(f'start "" "{exe_path}"\n')
-            # Скрипт удаляет сам себя, заметая следы
+            f.write('if errorlevel 1 (\n')
+            f.write('    echo Update failed. Starting existing version...\n')
+            f.write(f'    start "" "{exe_path}"\n')
+            f.write(') else (\n')
+            f.write('    echo Update completed successfully.\n')
+            f.write(f'    start "" "{exe_path}"\n')
+            f.write(')\n')
             f.write('del "%~f0"\n')
 
-        # Запускаем bat-файл скрыто, без черного окна консоли
         CREATE_NO_WINDOW = 0x08000000
-        subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=CREATE_NO_WINDOW)
+        subprocess.Popen(["cmd.exe", "/c", bat_path], creationflags=CREATE_NO_WINDOW, shell=False)
         
-        # Убиваем текущую программу
+        logger.info("Updater: Update script launched successfully.")
+        
         app = QApplication.instance()
         if app:
             app.quit()
         os._exit(0)
         
     except Exception as e:
-        print(f"Ошибка при запуске обновления: {e}")
+        logger.error(f"Error applying update: {e}")
+        try:
+            from PyQt5.QtWidgets import QMessageBox
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle("Ошибка обновления")
+            msg.setText(f"Не удалось применить обновление:\n{str(e)}")
+            msg.exec_()
+        except:
+            pass

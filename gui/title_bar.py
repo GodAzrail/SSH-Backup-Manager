@@ -98,6 +98,7 @@ class CustomTitleBar(QWidget):
                 font-size: 14px;
                 font-weight: bold;
                 padding: 0px;
+                outline: none;
             }
             QPushButton#BtnClose:hover {
                 background-color: #f7768e;
@@ -125,8 +126,10 @@ class CustomTitleBar(QWidget):
                 border: none;
                 border-radius: 6px; 
                 padding: 0px 15px; 
+                margin-right: 15px; 
                 font-weight: bold; 
                 font-size: 12px; 
+                outline: none;
             }
             QPushButton:hover { background-color: #8db0f8; }
             QPushButton:pressed { background-color: #6b8fd8; }
@@ -137,7 +140,6 @@ class CustomTitleBar(QWidget):
 
         layout.addStretch(1)
 
-        # --- ИСПРАВЛЕННЫЙ КОЛОКОЛЬЧИК (ИКОНКА SVG) ---
         self.btn_bell = QPushButton()
         self.btn_bell.setIcon(QIcon(get_resource_path(os.path.join("icon", "bell.svg"))))
         self.btn_bell.setIconSize(QSize(16, 16))
@@ -150,17 +152,14 @@ class CustomTitleBar(QWidget):
                 border: none;
                 padding: 0;
                 margin: 0;
+                outline: none;
             }
             QPushButton:hover {
                 background-color: rgba(59, 66, 97, 0.5);
             }
-            QPushButton:focus {
-                outline: none;
-            }
         """)
         self.btn_bell.clicked.connect(self.show_notifications)
         
-        # Индикатор новых уведомлений
         self.badge = QLabel(self.btn_bell)
         self.badge.setFixedSize(8, 8)
         self.badge.setStyleSheet("background-color: #f7768e; border-radius: 4px;")

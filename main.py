@@ -8,20 +8,17 @@ from PyQt5.QtCore import Qt
 from gui.main_window import MainWindow
 from core.scheduler import BackupScheduler
 
-# Настройка глобального логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def get_resource_path(relative_path):
-    """ Функция для правильного поиска файлов ресурсов (картинок) после сборки в exe """
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
-# Глобальная переменная для хранения "замочка", чтобы сборщик мусора Python его не удалил
 _mutex_handle = None
 
 def check_already_running():
-    """Проверяет, запущен ли уже экземпляр программы с помощью Windows Mutex."""
     global _mutex_handle
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
     _mutex_handle = kernel32.CreateMutexW(None, False, "SSHBackupManager_Unique_Mutex_Lock")
@@ -30,13 +27,46 @@ def check_already_running():
         return True
     return False
 
+def initialize_encryption():
+    try:
+        from utils.encryption import get_encryption_key
+        # Вызов get_encryption_key инициирует создание или безопасную миграцию
+        get_encryption_key() 
+        logger.info("Encryption initialized successfully.")
+        return True
+    except Exception as e:
+        logger.error(f"Encryption initialization failed: {e}")
+        return False
+
+def show_encryption_error(parent=None):
+    msg = QMessageBox(parent)
+    msg.setIcon(QMessageBox.Warning)
+    msg.setWindowTitle("SSH Backup Manager")
+    msg.setText("⚠ Ошибка инициализации шифрования")
+    msg.setInformativeText(
+        "Не удалось загрузить encryption key.\n\n"
+        "Возможные причины:\n"
+        "• Ключ шифрования отсутствует или повреждён\n"
+        "• База данных несовместима с текущим ключом\n\n"
+        "Сохранённые пароли временно недоступны.\n"
+        "Пожалуйста, восстановите файл secret.key из резервной копии "
+        "или введите пароли заново в настройках серверов."
+    )
+    msg.setStyleSheet("""
+        QMessageBox { background-color: #24283b; color: white; } 
+        QLabel { color: white; font-size: 13px; }
+        QPushButton { 
+            background-color: #3b4261; color: white; padding: 8px 16px; border-radius: 6px; min-width: 100px; font-weight: bold;
+        } 
+        QPushButton:hover { background-color: #7aa2f7; color: #1a1b26; }
+    """)
+    msg.exec_()
+
 def main():
     if sys.platform == "win32":
         myappid = 'godazrail.sshbackupmanager.1.0'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
-    # ИСПРАВЛЕНИЕ: Устанавливаем атрибут до инициализации QApplication
-    # Это решает ошибку "Qt WebEngine seems to be initialized from a plugin"
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     
     app = QApplication(sys.argv)
@@ -47,7 +77,7 @@ def main():
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle("SSH Backup Manager")
         msg.setText("Приложение уже работает!")
-        msg.setInformativeText("Проверьте системный трей (иконки возле часов в правом нижнем углу).")
+        msg.setInformativeText("Проверьте системный трей.")
         msg.setStyleSheet("""
             QMessageBox { background-color: #24283b; color: white; } 
             QLabel { color: white; font-size: 13px; }
@@ -76,18 +106,17 @@ def main():
     palette.setColor(QPalette.HighlightedText, Qt.black)
     app.setPalette(palette)
     
+    encryption_ok = initialize_encryption()
+    if not encryption_ok:
+        show_encryption_error()
+    
     scheduler = BackupScheduler()
     scheduler.start()
     
     window = MainWindow(scheduler)
     
-    # --- ЛОГИКА ФОНОВОГО ЗАПУСКА ---
-    # Если Windows запустила программу с флагом --minimized (из автозапуска)
-    if "--minimized" in sys.argv:
-        pass # Окно не вызывается, но программа работает в фоне (в трее)
-    else:
-        window.show() # Обычный запуск руками
-    # -------------------------------
+    if "--minimized" not in sys.argv:
+        window.show()
     
     sys.exit(app.exec_())
 

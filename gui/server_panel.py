@@ -1,4 +1,5 @@
 import os
+import logging
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QCheckBox, QSpinBox, QComboBox, 
                              QTimeEdit, QLabel, QFrame, QGraphicsDropShadowEffect, 
@@ -8,8 +9,10 @@ from PyQt5.QtCore import QThread, pyqtSignal, QTime, Qt, QSettings
 
 from gui.toast import Toast
 from core.ssh_manager import SSHManager
-from utils.encryption import encrypt_password, decrypt_password
+from utils.encryption import encrypt_password, decrypt_password, EncryptionError
 from database.db_manager import DBManager
+
+logger = logging.getLogger(__name__)
 
 class SSHTestThread(QThread):
     result_signal = pyqtSignal(bool, str)
@@ -36,6 +39,8 @@ class ServerPanel(QWidget):
         super().__init__(parent)
         self.db = DBManager()
         self.server_id = None 
+        self._original_password = None
+        self._original_key_pass = None
 
         self.setObjectName("OuterContainer")
         
@@ -175,7 +180,7 @@ class ServerPanel(QWidget):
         v_pass.addWidget(self.password_input)
         l2.addWidget(self.pass_container)
         
-        # Контейнер для SSH-ключей (Единое поле ввода)
+        # Контейнер для SSH-ключей
         self.key_container = QWidget()
         v_key = QVBoxLayout(self.key_container)
         v_key.setContentsMargins(0, 0, 0, 0)
@@ -212,7 +217,6 @@ class ServerPanel(QWidget):
         self.remote_path_input = QLineEdit()
         self.remote_path_input.setPlaceholderText("Удаленный путь (на сервере)")
         
-        # Локальная папка с кнопкой "Обзор"
         local_row = QHBoxLayout()
         local_row.setSpacing(8)
         self.local_path_input = QLineEdit()
@@ -398,6 +402,8 @@ class ServerPanel(QWidget):
 
     def clear_data(self):
         self.server_id = None
+        self._original_password = None
+        self._original_key_pass = None
         self.title_lbl.setText("Добавить сервер")
         self.name_input.clear()
         self.host_input.clear()
@@ -406,8 +412,10 @@ class ServerPanel(QWidget):
         
         self.radio_pass.setChecked(True)
         self.password_input.clear()
+        self.password_input.setPlaceholderText("Пароль")
         self.key_input.clear()
         self.key_pass_input.clear()
+        self.key_pass_input.setPlaceholderText("Пароль от ключа (если есть)")
         
         settings = QSettings("GodAzrail", "SSHBackupManager")
         default_local = settings.value("default_backup_dir", os.path.join(os.path.expanduser("~"), "SSH_Backups"))
@@ -443,18 +451,54 @@ class ServerPanel(QWidget):
             key_val = data[6] if data[6] else ""
             self.key_input.setPlainText(key_val)
             
-            try:
-                if data[5]: self.key_pass_input.setText(decrypt_password(data[5]))
-            except Exception as e:
-                self.key_pass_input.clear()
-                print(f"Ошибка расшифровки пароля ключа: {e}")
+            if data[5]:
+                try:
+                    decrypted = decrypt_password(data[5])
+                    self.key_pass_input.setText(decrypted)
+                    self._original_key_pass = decrypted
+                    self.key_pass_input.setPlaceholderText("Пароль от ключа (если есть)")
+                except EncryptionError as e:
+                    self.key_pass_input.clear()
+                    self.key_pass_input.setPlaceholderText("⚠ Ошибка расшифровки пароля ключа")
+                    self._original_key_pass = None
+                    Toast(self.window(), 
+                          "⚠ Не удалось расшифровать сохранённый пароль SSH-ключа.\n"
+                          "Проверьте encryption key или введите пароль заново.\n"
+                          "Существующие данные не изменены.", 
+                          is_error=True)
+                    logger.error(f"Decryption failed for key password: {e}")
+                except Exception as e:
+                    self.key_pass_input.clear()
+                    self._original_key_pass = None
+                    logger.error(f"Unexpected error decrypting key password: {e}")
+                    Toast(self.window(), f"Ошибка расшифровки: {str(e)}", is_error=True)
+            else:
+                self._original_key_pass = None
         else:
             self.radio_pass.setChecked(True)
-            try:
-                if data[5]: self.password_input.setText(decrypt_password(data[5]))
-            except Exception as e:
-                self.password_input.clear()
-                print(f"Ошибка расшифровки пароля: {e}")
+            if data[5]:
+                try:
+                    decrypted = decrypt_password(data[5])
+                    self.password_input.setText(decrypted)
+                    self._original_password = decrypted
+                    self.password_input.setPlaceholderText("Пароль")
+                except EncryptionError as e:
+                    self.password_input.clear()
+                    self.password_input.setPlaceholderText("⚠ Ошибка расшифровки пароля")
+                    self._original_password = None
+                    Toast(self.window(), 
+                          "⚠ Не удалось расшифровать сохранённый пароль.\n"
+                          "Проверьте encryption key или введите пароль заново.\n"
+                          "Существующие данные не изменены.", 
+                          is_error=True)
+                    logger.error(f"Decryption failed for password: {e}")
+                except Exception as e:
+                    self.password_input.clear()
+                    self._original_password = None
+                    logger.error(f"Unexpected error decrypting password: {e}")
+                    Toast(self.window(), f"Ошибка расшифровки: {str(e)}", is_error=True)
+            else:
+                self._original_password = None
             
         self.remote_path_input.setText(data[7])
         self.local_path_input.setText(data[8])
@@ -536,13 +580,54 @@ class ServerPanel(QWidget):
             Toast(self.window(), "Укажите SSH-ключ!", is_error=True)
             return
         
-        enc_password = encrypt_password(password) if password else b""
-        
-        if self.server_id: 
-            self.db.update_server(self.server_id, name, host, int(port), user, enc_password, key_path_val, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
-            Toast(self.window(), "Настройки обновлены!", is_error=False)
-        else: 
-            self.db.add_server(name, host, int(port), user, enc_password, key_path_val, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
-            Toast(self.window(), "Сервер добавлен!", is_error=False)
+        try:
+            enc_password = b""
             
-        self.saved_signal.emit()
+            if self.server_id:
+                if password:
+                    enc_password = encrypt_password(password)
+                else:
+                    if auth_type == 'key':
+                        original = self._original_key_pass
+                    else:
+                        original = self._original_password
+                    
+                    if original is not None:
+                        current_password = password
+                        if current_password == "" and original != "":
+                            enc_password = b""
+                            logger.info(f"User explicitly cleared password for server {self.server_id}")
+                        else:
+                            existing = self.db.cursor.execute(
+                                "SELECT password FROM servers WHERE id = ?", (self.server_id,)
+                            ).fetchone()
+                            if existing and existing[0]:
+                                enc_password = existing[0]
+                            else:
+                                enc_password = b""
+                    else:
+                        enc_password = b""
+            else:
+                if password:
+                    enc_password = encrypt_password(password)
+                else:
+                    enc_password = b""
+            
+            if self.server_id: 
+                self.db.update_server(self.server_id, name, host, int(port), user, enc_password, key_path_val, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
+                Toast(self.window(), "Настройки обновлены!", is_error=False)
+            else: 
+                self.db.add_server(name, host, int(port), user, enc_password, key_path_val, remote, local, auto, interval, max_backups, schedule_type, cron_day_combined, cron_time_combined, auth_type)
+                Toast(self.window(), "Сервер добавлен!", is_error=False)
+                
+            self.saved_signal.emit()
+            
+        except EncryptionError as e:
+            Toast(self.window(), 
+                  "⚠ Ошибка шифрования: ключ отсутствует или не соответствует данным.\n"
+                  "Пожалуйста, проверьте encryption key или введите пароль заново.",
+                  is_error=True)
+            logger.error(f"Encryption error during save: {e}")
+        except Exception as e:
+            Toast(self.window(), f"Ошибка сохранения: {str(e)}", is_error=True)
+            logger.error(f"Unexpected error during save: {e}")

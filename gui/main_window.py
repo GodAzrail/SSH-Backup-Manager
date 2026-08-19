@@ -29,7 +29,6 @@ def get_resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 def get_stylesheet():
-    # ИСПРАВЛЕНИЕ: Формируем абсолютный путь к иконке закрытия так же, как для колокольчика
     close_icon_path = get_resource_path(os.path.join("icos", "x.svg")).replace("\\", "/")
     if not os.path.exists(close_icon_path):
         close_icon_path = get_resource_path(os.path.join("icon", "x.svg")).replace("\\", "/")
@@ -40,6 +39,21 @@ def get_stylesheet():
         close_btn_css = "" 
 
     return f"""
+    /* ГЛОБАЛЬНОЕ ОТКЛЮЧЕНИЕ ПУНКТИРНЫХ РАМОК ФОКУСА */
+    * {{ outline: none; }}
+
+    /* КРАСИВЫЕ ВСПЛЫВАЮЩИЕ ПОДСКАЗКИ (TOOLTIPS) */
+    QToolTip {{
+        background-color: #1e2030;
+        color: #a9b1d6;
+        border: 1px solid #3b4261;
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-family: Arial;
+        font-size: 12px;
+        font-weight: bold;
+    }}
+
     /* Темный фон для всей верхней полосы (само окно) */
     QMainWindow {{ background-color: #0d0f17; }} 
 
@@ -51,11 +65,11 @@ def get_stylesheet():
     }}
     QWidget#DashboardContainer {{ background-color: #1a1b26; }}
 
-    QTabBar {{ background-color: #0d0f17; }} 
+    QTabBar {{ background-color: #0d0f17; outline: none; }} 
     QTabBar::tab {{ 
         background: #161824; 
         color: #565f89; 
-        padding: 8px 15px; 
+        padding: 8px 30px 8px 15px;
         border-radius: 8px; 
         margin: 8px 4px 8px 5px; 
         font-weight: bold; 
@@ -63,8 +77,8 @@ def get_stylesheet():
         font-size: 13px;
         min-width: 120px;
         border: none;
+        outline: none;
         height: 15px;
-        
     }}
     QTabBar::tab:selected {{ 
         background: #24283b; 
@@ -75,28 +89,30 @@ def get_stylesheet():
         color: #a9b1d6; 
     }}
  
-      
     /* Кастомная иконка закрытия вкладки (крестик) */
     QTabBar::close-button {{
         {close_btn_css}
         background: transparent;
         padding: 2px;
         border-radius: 4px;
+        outline: none;
         
     }}
     QTabBar::close-button:hover {{
-        background: rgba(247, 118, 142, 0.2);
+        background: rgba(122, 162, 247, 0.2);
     }}
 
     /* ОСТАЛЬНЫЕ ЭЛЕМЕНТЫ */
     QListWidget {{ background-color: #1e2030; border: none; outline: none; color: #a9b1d6; font-size: 14px; font-weight: bold; padding: 10px 0px; }}
-    QListWidget::item {{ padding: 15px 20px; border-radius: 8px; margin: 3px 10px; }}
+    QListWidget::item {{ padding: 15px 20px; border-radius: 8px; margin: 3px 10px; outline: none; }}
     QListWidget::item:selected {{ background-color: #3b4261; color: white; border-left: 3px solid #7aa2f7; }}
     QListWidget::item:hover:!selected {{ background-color: #2a2d3d; }}
-    QPushButton {{ border-radius: 6px; font-weight: bold; border: none; }}
+    
+    QPushButton {{ border-radius: 6px; font-weight: bold; border: none; outline: none; }}
     #BtnPrimary {{ background-color: #7aa2f7; color: #1a1b26; font-size: 13px; min-width: 150px; padding: 10px 20px; }}
     #BtnPrimary:hover {{ background-color: #8db0f8; }}
     #BtnPrimary:pressed {{ background-color: #6b8fd8; }}
+    
     QScrollArea {{ border: none; background: transparent; }}
     QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
     QScrollBar::handle:vertical {{ background: #3b4261; border-radius: 4px; min-height: 30px; }}
@@ -244,9 +260,10 @@ class ServerCard(QFrame):
         
         self.backup_btn = QPushButton("Бэкап")
         self.backup_btn.setCursor(Qt.PointingHandCursor)
+        self.backup_btn.setFixedHeight(28)  # ФИКСИРУЕМ ВЫСОТУ
         self.backup_btn.setFont(QFont("Arial", 9, QFont.Bold))
         self.backup_btn.setStyleSheet("""
-            QPushButton { background-color: #7aa2f7; color: #1a1b26; padding: 6px 12px; border-radius: 6px; font-weight: bold; border: none; }
+            QPushButton { background-color: #7aa2f7; color: #1a1b26; padding: 0px 12px; border-radius: 6px; font-weight: bold; border: none; outline: none; }
             QPushButton:hover { background-color: #8db0f8; }
             QPushButton:disabled { background-color: #292e42; color: #565f89; }
         """)
@@ -254,9 +271,10 @@ class ServerCard(QFrame):
 
         self.history_btn = QPushButton("История")
         self.history_btn.setCursor(Qt.PointingHandCursor)
+        self.history_btn.setFixedHeight(28)  # ФИКСИРУЕМ ВЫСОТУ
         self.history_btn.setFont(QFont("Arial", 9, QFont.Bold))
         self.history_btn.setStyleSheet("""
-            QPushButton { background-color: #3b4261; color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold; border: none; }
+            QPushButton { background-color: #3b4261; color: white; padding: 0px 12px; border-radius: 6px; font-weight: bold; border: none; outline: none; }
             QPushButton:hover { background-color: #4a5175; }
         """)
         self.history_btn.clicked.connect(lambda: history_cb(self.server_data))
@@ -264,9 +282,10 @@ class ServerCard(QFrame):
         self.shell_btn = QPushButton(">_")
         self.shell_btn.setCursor(Qt.PointingHandCursor)
         self.shell_btn.setToolTip("Открыть терминал")
+        self.shell_btn.setFixedHeight(28)  # ФИКСИРУЕМ ВЫСОТУ
         self.shell_btn.setFont(QFont("Consolas", 11, QFont.Bold))
         self.shell_btn.setStyleSheet("""
-            QPushButton { background-color: #24283b; color: #7aa2f7; padding: 6px 12px; border-radius: 6px; font-weight: bold; border: 1px solid #3b4261; }
+            QPushButton { background-color: #24283b; color: #7aa2f7; padding: 0px 10px; border-radius: 6px; font-weight: bold; border: 1px solid #3b4261; outline: none; }
             QPushButton:hover { background-color: #3b4261; color: white; border: 1px solid #7aa2f7; }
         """)
         self.shell_btn.clicked.connect(lambda: self.main_window.open_terminal(self.server_data))
@@ -277,7 +296,7 @@ class ServerCard(QFrame):
         edit_btn.setIcon(QIcon(get_resource_path(os.path.join("icon", "gear.svg"))))
         edit_btn.setIconSize(QSize(18, 18))
         edit_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; border: 1px solid transparent; border-radius: 5px; padding: 0;}
+            QPushButton { background-color: transparent; border: 1px solid transparent; border-radius: 5px; padding: 0; outline: none; }
             QPushButton:hover { background-color: rgba(86, 95, 137, 0.2); }
         """)
         edit_btn.clicked.connect(lambda: edit_cb(self.server_data))
@@ -287,7 +306,7 @@ class ServerCard(QFrame):
         del_btn.setFixedSize(28, 28)
         del_btn.setFont(QFont("Arial", 12))
         del_btn.setStyleSheet("""
-            QPushButton { background-color: transparent; color: #565f89; border: 1px solid transparent; border-radius: 5px; padding: 0;}
+            QPushButton { background-color: transparent; color: #565f89; border: 1px solid transparent; border-radius: 5px; padding: 0; outline: none; }
             QPushButton:hover { background-color: rgba(247, 118, 142, 0.2); color: #f7768e; }
         """)
         del_btn.clicked.connect(lambda: delete_cb(self.server_data[0]))
@@ -429,7 +448,6 @@ class MainWindow(QMainWindow):
         self.title_bar.setObjectName("AppTitleBarContainer")
         self.title_bar.setFixedHeight(40) # Фиксируем высоту шапки
         
-        # ИСПРАВЛЕНИЕ: Стили кнопок управления окном в точности как у колокольчика[cite: 3]
         self.title_bar.setStyleSheet("""
             QWidget#AppTitleBarContainer { 
                 background: transparent; 
@@ -442,6 +460,7 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
                 padding: 0px;
                 margin: 0px;
+                outline: none;
             }
             QPushButton:hover { 
                 background-color: rgba(59, 66, 97, 0.5); 
@@ -525,7 +544,7 @@ class MainWindow(QMainWindow):
         self.btn_logs.setCursor(Qt.PointingHandCursor)
         self.btn_logs.setCheckable(True) 
         self.btn_logs.setStyleSheet("""
-            QPushButton { background-color: #1a1b26; color: #565f89; font-size: 13px; font-weight: bold; text-align: left; padding: 12px 15px; border-radius: 8px; margin: 0px 15px 15px 15px; border: 1px solid #292e42; }
+            QPushButton { background-color: #1a1b26; color: #565f89; font-size: 13px; font-weight: bold; text-align: left; padding: 12px 15px; border-radius: 8px; margin: 0px 15px 15px 15px; border: 1px solid #292e42; outline: none; }
             QPushButton:hover:!checked { background-color: #24283b; color: #a9b1d6; border: 1px solid #3b4261; }
             QPushButton:checked { background-color: #3b4261; color: white; border: 1px solid #3b4261; border-left: 3px solid #7aa2f7; border-radius: 8px; }
         """)
@@ -644,6 +663,11 @@ class MainWindow(QMainWindow):
         self.load_servers()
         self.check_for_updates() 
 
+        # Таймер для фоновой периодической проверки обновлений (раз в час)
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self.check_for_updates)
+        self.update_timer.start(3600 * 1000)
+
     def open_terminal(self, server_data):
         try:
             from core.ssh_manager import SSHManager
@@ -674,14 +698,26 @@ class MainWindow(QMainWindow):
             card.net_timer.setInterval(new_interval * 1000)
 
     def check_for_updates(self):
+        # Защита от дублирующих проверок, если загрузка уже идёт
+        if hasattr(self, 'downloader') and self.downloader.isRunning():
+            return
+            
         self.checker = UpdateChecker(current_version=self.current_version, owner="GodAzrail", repo="SSH-Backup-Manager")
         self.checker.update_available.connect(self.on_update_found)
         self.checker.start()
 
     def on_update_found(self, version, url, body):
+        # Если нашли обновление, останавливаем периодический таймер
+        if hasattr(self, 'update_timer'):
+            self.update_timer.stop()
+            
         self.update_url = url
         self.update_btn.setText(f"Установить обновление {version}")
         self.update_btn.show()
+        
+        # Добавляем уведомление в историю колокольчика
+        if hasattr(self, 'title_bar'):
+            self.title_bar.add_history("Обновление", f"Доступна новая версия программы: {version}", False)
 
     def start_update_download(self):
         self.update_btn.setEnabled(False)
@@ -890,7 +926,7 @@ class MainWindow(QMainWindow):
         msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         msg_box.button(QMessageBox.Yes).setText("Да, удалить")
         msg_box.button(QMessageBox.No).setText("Отмена")
-        msg_box.setStyleSheet("QMessageBox { background-color: #24283b; color: white; } QPushButton { background-color: #3b4261; color: white; padding: 8px 16px; border-radius: 6px; min-width: 80px; } QPushButton:hover { background-color: #4a5175; }")
+        msg_box.setStyleSheet("QMessageBox { background-color: #24283b; color: white; } QPushButton { background-color: #3b4261; color: white; padding: 8px 16px; border-radius: 6px; min-width: 80px; outline: none; } QPushButton:hover { background-color: #4a5175; }")
         
         if msg_box.exec_() == QMessageBox.Yes:
             self.db.delete_server(server_id)

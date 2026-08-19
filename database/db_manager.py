@@ -1,18 +1,14 @@
 import sqlite3
 import os
 from pathlib import Path
-
-# Определяем защищенную папку в профиле пользователя (например, C:\Users\Имя\AppData\Roaming\SSHBackupManager)
-APP_DATA_DIR = Path(os.getenv('APPDATA', Path.home())) / "SSHBackupManager"
-DB_DIR = APP_DATA_DIR / "database"
-DB_PATH = DB_DIR / "backups.db"
+import utils.path_config
 
 class DBManager:
     def __init__(self):
-        # Создаем директорию AppData\Roaming\SSHBackupManager\database, если её нет
-        DB_DIR.mkdir(parents=True, exist_ok=True)
+        # Берем пути динамически, чтобы тесты могли их подменять
+        utils.path_config.DATABASE_DIR.mkdir(parents=True, exist_ok=True)
         
-        self.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        self.conn = sqlite3.connect(str(utils.path_config.DB_PATH), check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.init_db()
 
@@ -27,7 +23,6 @@ class DBManager:
             )
         ''')
         
-        # Безопасное обновление структуры старой базы данных
         try:
             self.cursor.execute("ALTER TABLE servers ADD COLUMN max_backups INTEGER DEFAULT 3")
             self.conn.commit()
@@ -40,7 +35,6 @@ class DBManager:
             self.conn.commit()
         except sqlite3.OperationalError: pass
 
-        # Добавление поля типа авторизации для новых версий
         try:
             self.cursor.execute("ALTER TABLE servers ADD COLUMN auth_type TEXT DEFAULT 'password'")
             self.conn.commit()

@@ -4,18 +4,17 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QLineEdit,
                              QRadioButton, QButtonGroup, QFileDialog, QTextEdit)
 from PyQt5.QtCore import QThread, pyqtSignal, QTime
 from core.ssh_manager import SSHManager
-from utils.encryption import encrypt_password
+from utils.encryption import encrypt_password, decrypt_password, EncryptionError
 from database.db_manager import DBManager
+import logging
+
+logger = logging.getLogger(__name__)
 
 DIALOG_STYLE = """
 QDialog { background-color: #1a1b26; }
 QLabel { color: #a9b1d6; font-size: 13px; font-weight: bold; }
 QLineEdit, QSpinBox, QComboBox, QTimeEdit, QTextEdit { 
-    background-color: #24283b; 
-    color: white; 
-    border: 1px solid #565f89; 
-    border-radius: 4px; 
-    padding: 6px; 
+    background-color: #24283b; color: white; border: 1px solid #565f89; border-radius: 4px; padding: 6px; 
 }
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QTimeEdit:focus, QTextEdit:focus { border: 1px solid #7aa2f7; }
 QComboBox::drop-down { border: none; }
@@ -49,12 +48,14 @@ class SSHTestThread(QThread):
         except Exception as e:
             self.result_signal.emit(False, f"Ошибка: {str(e)}")
 
-
 class AddServerDialog(QDialog):
     def __init__(self, parent=None, server_data=None):
         super().__init__(parent)
         self.db = DBManager()
         self.server_data = server_data 
+        
+        self.existing_password_blob = b""
+        self.decryption_failed = False
         
         self.setWindowTitle("Настройка сервера" if server_data else "Добавление нового сервера")
         self.setFixedSize(480, 680) 
@@ -70,14 +71,12 @@ class AddServerDialog(QDialog):
         layout = QVBoxLayout(self)
         form_layout = QFormLayout()
 
-        # ОСНОВНЫЕ
         self.name_input = QLineEdit()
         self.host_input = QLineEdit()
         self.port_input = QLineEdit("22")
         self.user_input = QLineEdit()
         self.remote_path_input = QLineEdit()
 
-        # АВТОРИЗАЦИЯ
         self.auth_group = QButtonGroup(self)
         self.radio_pass = QRadioButton("Пароль")
         self.radio_key = QRadioButton("SSH-ключ")
@@ -91,7 +90,6 @@ class AddServerDialog(QDialog):
 
         self.auth_stack = QStackedWidget()
         
-        # Страница: Пароль
         pass_page = QWidget()
         pass_layout = QVBoxLayout(pass_page)
         pass_layout.setContentsMargins(0, 0, 0, 0)
@@ -100,7 +98,6 @@ class AddServerDialog(QDialog):
         self.password_input.setPlaceholderText("Оставьте пустым, чтобы не менять" if server_data else "Пароль")
         pass_layout.addWidget(self.password_input)
         
-        # Страница: SSH-Ключ
         key_page = QWidget()
         key_layout = QVBoxLayout(key_page)
         key_layout.setContentsMargins(0, 0, 0, 0)
@@ -135,7 +132,7 @@ class AddServerDialog(QDialog):
         
         self.passphrase_input = QLineEdit()
         self.passphrase_input.setEchoMode(QLineEdit.Password)
-        self.passphrase_input.setPlaceholderText("Пароль от ключа (если есть)")
+        self.passphrase_input.setPlaceholderText("Оставьте пустым, чтобы не менять" if server_data else "Пароль от ключа (если есть)")
         
         key_layout.addWidget(self.key_type_combo)
         key_layout.addWidget(self.key_stack)
@@ -146,7 +143,6 @@ class AddServerDialog(QDialog):
         self.radio_pass.toggled.connect(lambda: self.auth_stack.setCurrentIndex(0))
         self.radio_key.toggled.connect(lambda: self.auth_stack.setCurrentIndex(1))
 
-        # СИНХРОНИЗАЦИЯ
         local_path_layout = QHBoxLayout()
         self.local_path_input = QLineEdit()
         self.local_path_input.setText(self.db.get_setting('default_backup_path', 'C:\\Backups'))
@@ -188,7 +184,6 @@ class AddServerDialog(QDialog):
         
         self.schedule_type_combo.currentIndexChanged.connect(self.time_stack.setCurrentIndex)
 
-        # Сборка формы
         form_layout.addRow("Название:", self.name_input)
         form_layout.addRow("Хост (IP):", self.host_input)
         form_layout.addRow("Порт SSH:", self.port_input)
@@ -204,7 +199,6 @@ class AddServerDialog(QDialog):
         layout.addLayout(form_layout)
         layout.addWidget(self.auto_backup_cb)
 
-        # Заполнение данных при редактировании
         if self.server_data:
             self.name_input.setText(server_data[1])
             self.host_input.setText(server_data[2])
@@ -229,6 +223,15 @@ class AddServerDialog(QDialog):
             if len(server_data) >= 16:
                 auth_type = server_data[15]
                 key_path_val = server_data[6]
+                self.existing_password_blob = server_data[5] or b""
+                
+                # ИСПРАВЛЕНИЕ: Безопасная расшифровка
+                if self.existing_password_blob:
+                    try:
+                        decrypted_pass = decrypt_password(self.existing_password_blob)
+                    except EncryptionError:
+                        self.decryption_failed = True
+                        decrypted_pass = ""
                 
                 if auth_type == 'key':
                     self.radio_key.setChecked(True)
@@ -238,6 +241,17 @@ class AddServerDialog(QDialog):
                     else:
                         self.key_type_combo.setCurrentIndex(0)
                         self.key_file_input.setText(key_path_val if key_path_val else "")
+                    
+                    if self.decryption_failed:
+                        self.passphrase_input.setPlaceholderText("⚠ Ошибка расшифровки ключа")
+                        self.passphrase_input.setStyleSheet("border: 1px solid #f7768e;")
+                        self.passphrase_input.setReadOnly(True)
+                else:
+                    self.radio_pass.setChecked(True)
+                    if self.decryption_failed:
+                        self.password_input.setPlaceholderText("⚠ Ошибка расшифровки пароля")
+                        self.password_input.setStyleSheet("border: 1px solid #f7768e;")
+                        self.password_input.setReadOnly(True)
 
         btn_layout = QHBoxLayout()
         self.test_btn = QPushButton("Тест подключения")
@@ -263,44 +277,42 @@ class AddServerDialog(QDialog):
             self.key_file_input.setText(path)
 
     def validate_key_input(self):
-        """Проверяет, не вставил ли пользователь публичный ключ вместо приватного"""
         if self.radio_key.isChecked():
-            if self.key_type_combo.currentIndex() == 0:  # Режим файла
+            if self.key_type_combo.currentIndex() == 0:
                 key_path = self.key_file_input.text().strip()
                 if key_path.lower().endswith('.pub'):
-                    QMessageBox.warning(self, "Ошибка SSH-ключа", 
-                                        "Вы выбрали публичный ключ (.pub).\n\n"
-                                        "Для подключения к серверу нужен ПРИВАТНЫЙ ключ (обычно это файл без расширения или .pem / .ppk). "
-                                        "Публичный ключ (.pub) должен находиться на самом сервере.")
+                    QMessageBox.warning(self, "Ошибка SSH-ключа", "Вы выбрали публичный ключ (.pub).\nНужен ПРИВАТНЫЙ ключ.")
                     return False
-            else:  # Режим текста
+            else:
                 key_text = self.key_text_input.toPlainText().strip()
                 if key_text.startswith("ssh-rsa") or key_text.startswith("ssh-ed25519") or key_text.startswith("ecdsa-"):
-                    QMessageBox.warning(self, "Ошибка SSH-ключа", 
-                                        "Вы вставили текст публичного ключа.\n\n"
-                                        "Для авторизации требуется ПРИВАТНЫЙ ключ. "
-                                        "Его текст выглядит как большой блок символов и обычно начинается со строк '-----BEGIN OPENSSH PRIVATE KEY-----'.")
+                    QMessageBox.warning(self, "Ошибка SSH-ключа", "Вы вставили текст публичного ключа.\nТребуется ПРИВАТНЫЙ ключ.")
                     return False
                 if key_text and "PRIVATE KEY" not in key_text:
-                    QMessageBox.warning(self, "Подозрительный ключ", 
-                                        "Вставленный текст не похож на приватный ключ (отсутствует маркер PRIVATE KEY).\n\n"
-                                        "Убедитесь, что вы скопировали содержимое приватного ключа полностью, включая первую и последнюю строки с дефисами.")
+                    QMessageBox.warning(self, "Подозрительный ключ", "Текст не похож на приватный ключ.")
                     return False
         return True
 
     def test_connection(self):
-        # ИЗМЕНЕНИЕ: Запускаем проверку перед тестом
-        if not self.validate_key_input():
+        if not self.validate_key_input(): return
+        if self.decryption_failed:
+            QMessageBox.warning(self, "Ошибка", "Невозможно протестировать: ошибка расшифровки пароля.")
             return
 
         host, port, user = self.host_input.text(), self.port_input.text(), self.user_input.text()
-        
         auth_type = 'password' if self.radio_pass.isChecked() else 'key'
-        if auth_type == 'password':
-            password = self.password_input.text()
-            key_path = ""
-        else:
-            password = self.passphrase_input.text()
+        
+        password = self.password_input.text() if auth_type == 'password' else self.passphrase_input.text()
+        
+        # Подставляем старый пароль для теста, если поле пустое
+        if not password and self.server_data and self.existing_password_blob:
+            try:
+                password = decrypt_password(self.existing_password_blob)
+            except EncryptionError:
+                pass
+
+        key_path = ""
+        if auth_type == 'key':
             key_path = self.key_file_input.text() if self.key_type_combo.currentIndex() == 0 else self.key_text_input.toPlainText()
 
         if not all([host, port, user]):
@@ -320,16 +332,13 @@ class AddServerDialog(QDialog):
         else: QMessageBox.critical(self, "Ошибка", message)
 
     def save_server(self):
-        # ИЗМЕНЕНИЕ: Запускаем проверку перед сохранением
-        if not self.validate_key_input():
-            return
+        if not self.validate_key_input(): return
 
         name, host, port, user = self.name_input.text(), self.host_input.text(), self.port_input.text(), self.user_input.text()
         remote, local = self.remote_path_input.text(), self.local_path_input.text()
         auto = self.auto_backup_cb.isChecked()
         max_backups = self.max_backups_spinbox.value() 
         interval = self.interval_spinbox.value()
-        
         schedule_type = 'interval' if self.schedule_type_combo.currentIndex() == 0 else 'cron'
         cron_day = self.day_map[self.cron_day_combo.currentText()]
         cron_time = self.cron_time_edit.time().toString("HH:mm")
@@ -340,16 +349,18 @@ class AddServerDialog(QDialog):
             
         auth_type = 'password' if self.radio_pass.isChecked() else 'key'
         key_path_val = ""
-        pass_val = self.password_input.text()
+        pass_val = self.password_input.text() if auth_type == 'password' else self.passphrase_input.text()
         
         if auth_type == 'key':
-            pass_val = self.passphrase_input.text()
-            if self.key_type_combo.currentIndex() == 0:
-                key_path_val = self.key_file_input.text()
-            else:
-                key_path_val = self.key_text_input.toPlainText()
+            key_path_val = self.key_file_input.text() if self.key_type_combo.currentIndex() == 0 else self.key_text_input.toPlainText()
         
-        enc_password = encrypt_password(pass_val) if pass_val else b""
+        # ИСПРАВЛЕНИЕ: Логика сохранения с защитой от перезаписи
+        enc_password = b""
+        if pass_val:
+            enc_password = encrypt_password(pass_val)
+        elif self.server_data:
+            # Если пользователь оставил поле пустым при редактировании, сохраняем старый blob
+            enc_password = self.existing_password_blob
         
         if self.server_data: 
             self.db.update_server(self.server_data[0], name, host, int(port), user, enc_password, key_path_val, remote, local, auto, interval, max_backups, schedule_type, cron_day, cron_time, auth_type)
