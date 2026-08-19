@@ -77,15 +77,32 @@ class SettingsView(QWidget):
             QSpinBox::up-button, QSpinBox::down-button { background-color: #3b4261; border-radius: 3px; margin: 1px; }
             QSpinBox::up-button:hover, QSpinBox::down-button:hover { background-color: #7aa2f7; }
         """)
-        self.spin_interval.valueChanged.connect(lambda v: self.settings.setValue("check_interval", v))
+        self.spin_interval.valueChanged.connect(self.on_interval_changed)
         
         interval_layout.addWidget(lbl_interval)
         interval_layout.addStretch()
         interval_layout.addWidget(self.spin_interval)
 
+        # ДОБАВЛЕНА настройка лимита скорости
+        speed_layout = QHBoxLayout()
+        lbl_speed = QLabel("Лимит скорости скачивания (МБ/с, 0 = без лимита):")
+        lbl_speed.setStyleSheet("color: #a9b1d6; font-size: 14px; font-weight: bold;")
+        
+        self.spin_speed = QSpinBox()
+        self.spin_speed.setRange(0, 1000)
+        self.spin_speed.setValue(self.settings.value("max_download_speed", 0, type=int))
+        self.spin_speed.setCursor(Qt.PointingHandCursor)
+        self.spin_speed.setStyleSheet(self.spin_interval.styleSheet())
+        self.spin_speed.valueChanged.connect(lambda v: self.settings.setValue("max_download_speed", v))
+        
+        speed_layout.addWidget(lbl_speed)
+        speed_layout.addStretch()
+        speed_layout.addWidget(self.spin_speed)
+
         system_group.layout().addWidget(self.cb_autostart)
         system_group.layout().addWidget(self.cb_start_minimized)
         system_group.layout().addLayout(interval_layout)
+        system_group.layout().addLayout(speed_layout)
         
         # --- БЛОК 2: УВЕДОМЛЕНИЯ ---
         notif_group = self.create_group("Уведомления")
@@ -106,7 +123,6 @@ class SettingsView(QWidget):
         # --- БЛОК 3: ХРАНИЛИЩЕ ---
         folder_group = self.create_group("Хранилище")
         
-        # НОВОЕ: Удаленный путь по умолчанию
         lbl_remote = QLabel("Удаленный путь по умолчанию (на сервере):")
         lbl_remote.setStyleSheet("color: #a9b1d6; font-size: 14px; font-weight: bold;")
         
@@ -118,7 +134,6 @@ class SettingsView(QWidget):
         """)
         self.remote_input.textChanged.connect(lambda t: self.settings.setValue("default_remote_path", t))
         
-        # Локальный путь
         lbl_folder = QLabel("Папка для сохранения бэкапов по умолчанию:")
         lbl_folder.setStyleSheet("color: #a9b1d6; font-size: 14px; font-weight: bold; margin-top: 10px;")
         
@@ -159,6 +174,11 @@ class SettingsView(QWidget):
         
         layout.addLayout(header_layout)
         layout.addWidget(scroll)
+
+    def on_interval_changed(self, value):
+        self.settings.setValue("check_interval", value)
+        if hasattr(self.main_window, 'update_network_timers'):
+            self.main_window.update_network_timers(value)
 
     def create_group(self, title_text):
         group = QFrame()

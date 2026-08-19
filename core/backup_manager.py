@@ -1,13 +1,19 @@
 import os
 import time 
 import logging
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, QObject, QSettings
 from core.ssh_manager import SSHManager
 from utils.encryption import decrypt_password
 from database.db_manager import DBManager
 
+class GlobalBackupSignals(QObject):
+    started = pyqtSignal(int)
+    progress = pyqtSignal(int, int, str)  # ID, Процент, Текст (скорость, ETA)
+    finished = pyqtSignal(int, bool, str)
+
+global_signals = GlobalBackupSignals()
+
 def translate_error(err_str):
-    """Переводит и фильтрует системные ошибки Linux/SSH на понятный русский язык"""
     if not err_str: 
         return "Неизвестная ошибка."
     
@@ -47,30 +53,82 @@ def rotate_backups(server_id, max_backups):
         except Exception as e:
             logging.error(f"Не удалось удалить старый бэкап {filepath}: {e}")
 
+def create_sftp_callback(start_time, max_mb_sec, signal_emitter, server_id=None):
+    """Генератор callback-функции для SFTP с расчетом ETA и ограничением скорости"""
+    max_bytes_sec = max_mb_sec * 1024 * 1024
+    state = {'last_emit': 0}
+    
+    def callback(transferred, total):
+        now = time.time()
+        elapsed = now - start_time
+        if elapsed <= 0: elapsed = 0.001
+        
+        current_speed = transferred / elapsed
+        
+        # Контроль скорости (Rate Limiting)
+        if max_bytes_sec > 0 and current_speed > max_bytes_sec:
+            expected_time = transferred / max_bytes_sec
+            time.sleep(expected_time - elapsed)
+            now = time.time()
+            elapsed = now - start_time
+            current_speed = transferred / elapsed
+
+        # Обновляем UI не чаще 5 раз в секунду, чтобы не перегружать поток GUI
+        if now - state['last_emit'] > 0.2 or transferred == total:
+            state['last_emit'] = now
+            speed_mb = current_speed / (1024 * 1024)
+            remaining_bytes = total - transferred
+            eta_sec = remaining_bytes / current_speed if current_speed > 0 else 0
+            
+            percent = int((transferred / total) * 100) if total > 0 else 0
+            status_text = f"{percent}% | {speed_mb:.1f} МБ/с | Ост: {int(eta_sec)}с"
+            
+            if server_id is not None:
+                signal_emitter.emit(server_id, percent, status_text)
+            else:
+                signal_emitter.emit(percent, status_text)
+                
+    return callback
+
 def perform_background_backup(server_data):
     server_id, name, host, port, username, pwd_blob, key_path, remote_path, local_path, auto, interval, max_backups, schedule_type, cron_day, cron_time, *extra = server_data
     ssh_mgr = None
     remote_archive_path = None
     start_time = time.time()
+    
+    global_signals.started.emit(server_id)
+    
     try:
+        logging.info(f"[{name}] Авто-бэкап запущен по расписанию.")
         password = decrypt_password(pwd_blob) if pwd_blob else None
         ssh_mgr = SSHManager(host, port, username, password, key_path)
         
-        logging.info(f"[{name}] Авто-бэкап: Подключение к серверу...")
+        global_signals.progress.emit(server_id, 0, "Подключение по SSH...")
         ssh_mgr.connect()
         
-        # Очистка мусора от прошлых сбоев перед созданием нового архива
         ssh_mgr.client.exec_command("rm -f /tmp/*backup_*.tar.gz /tmp/restore_*.tar.gz")
+        
+        global_signals.progress.emit(server_id, 0, "Экспорт Docker контейнеров...")
+        docker_cmd = """
+        mkdir -p /tmp/docker_dumps
+        if command -v docker &> /dev/null; then
+            docker ps -a > /tmp/docker_dumps/ps_list.txt 2>/dev/null
+            docker inspect $(docker ps -aq) > /tmp/docker_dumps/containers.json 2>/dev/null
+        fi
+        """
+        stdin, stdout, stderr = ssh_mgr.client.exec_command(docker_cmd)
+        stdout.channel.recv_exit_status() # Ждем завершения дампа
         
         archive_name = f"full_backup_{int(time.time())}.tar.gz" if remote_path == "/" else f"backup_{int(time.time())}.tar.gz"
         remote_archive_path = f"/tmp/{archive_name}"
         
+        global_signals.progress.emit(server_id, 0, "Создание tar-архива...")
         if remote_path == "/":
             command = (f"tar -czpf {remote_archive_path} --exclude={remote_archive_path} "
                        f"--exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run "
-                       f"--exclude=/tmp --exclude=/mnt --exclude=/media --exclude=/lost+found {remote_path}")
+                       f"--exclude=/tmp/*.tar.gz --exclude=/mnt --exclude=/media --exclude=/lost+found {remote_path} /tmp/docker_dumps")
         else:
-            command = f"tar -czpf {remote_archive_path} {remote_path}"
+            command = f"tar -czpf {remote_archive_path} {remote_path} /tmp/docker_dumps"
 
         stdin, stdout, stderr = ssh_mgr.client.exec_command(command)
         exit_status = stdout.channel.recv_exit_status()
@@ -84,10 +142,16 @@ def perform_background_backup(server_data):
             
         local_archive_path = os.path.join(server_backup_dir, archive_name)
 
-        sftp = ssh_mgr.client.open_sftp()
-        sftp.get(remote_archive_path, local_archive_path)
+        logging.info(f"[{name}] Загрузка готового архива...")
+        max_speed = QSettings("GodAzrail", "SSHBackupManager").value("max_download_speed", 0, type=int)
         
+        sftp = ssh_mgr.client.open_sftp()
+        sftp_cb = create_sftp_callback(time.time(), max_speed, global_signals.progress, server_id)
+        sftp.get(remote_archive_path, local_archive_path, callback=sftp_cb)
+        
+        logging.info(f"[{name}] Очистка временных файлов на сервере...")
         sftp.remove(remote_archive_path)
+        ssh_mgr.client.exec_command("rm -rf /tmp/docker_dumps")
         sftp.close()
         
         db = DBManager()
@@ -99,6 +163,7 @@ def perform_background_backup(server_data):
         time_str = f"{mins} мин. {secs} сек." if mins > 0 else f"{secs} сек."
         
         logging.info(f"[{name}] Авто-бэкап успешно завершен за {time_str}")
+        global_signals.finished.emit(server_id, True, f"Авто-бэкап завершен за {time_str}")
         return True
     except Exception as e:
         ru_error = translate_error(e)
@@ -108,13 +173,15 @@ def perform_background_backup(server_data):
                 ssh_mgr.client.exec_command(f"rm -f {remote_archive_path}")
             except:
                 pass
+        global_signals.finished.emit(server_id, False, ru_error)
         return False
     finally:
         if ssh_mgr and ssh_mgr.client:
             ssh_mgr.client.close()
 
+
 class BackupThread(QThread):
-    progress_signal = pyqtSignal(int)
+    progress_signal = pyqtSignal(int, str)
     finished_signal = pyqtSignal(bool, str)
 
     def __init__(self, server_data):
@@ -130,22 +197,35 @@ class BackupThread(QThread):
             password = decrypt_password(pwd_blob) if pwd_blob else None
             ssh_mgr = SSHManager(host, port, username, password, key_path)
             
+            self.progress_signal.emit(0, "Подключение по SSH...")
             logging.info(f"[{name}] Подключение по SSH...")
             ssh_mgr.connect()
             
-            # Очистка мусора от прошлых сбоев перед созданием нового архива
             ssh_mgr.client.exec_command("rm -f /tmp/*backup_*.tar.gz /tmp/restore_*.tar.gz")
             
+            self.progress_signal.emit(0, "Экспорт Docker контейнеров...")
+            docker_cmd = """
+            mkdir -p /tmp/docker_dumps
+            if command -v docker &> /dev/null; then
+                docker ps -a > /tmp/docker_dumps/ps_list.txt 2>/dev/null
+                docker inspect $(docker ps -aq) > /tmp/docker_dumps/containers.json 2>/dev/null
+            fi
+            """
+            stdin, stdout, stderr = ssh_mgr.client.exec_command(docker_cmd)
+            stdout.channel.recv_exit_status()
+
             archive_name = f"full_backup_{int(time.time())}.tar.gz" if remote_path == "/" else f"backup_{int(time.time())}.tar.gz"
             remote_archive_path = f"/tmp/{archive_name}"
             
+            self.progress_signal.emit(0, "Выполнение tar-архивации...")
             logging.info(f"[{name}] Выполнение tar-архивации (это может занять время)...")
+            
             if remote_path == "/":
                 command = (f"tar -czpf {remote_archive_path} --exclude={remote_archive_path} "
                            f"--exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run "
-                           f"--exclude=/tmp --exclude=/mnt --exclude=/media --exclude=/lost+found {remote_path}")
+                           f"--exclude=/tmp/*.tar.gz --exclude=/mnt --exclude=/media --exclude=/lost+found {remote_path} /tmp/docker_dumps")
             else:
-                command = f"tar -czpf {remote_archive_path} {remote_path}"
+                command = f"tar -czpf {remote_archive_path} {remote_path} /tmp/docker_dumps"
 
             stdin, stdout, stderr = ssh_mgr.client.exec_command(command)
             if stdout.channel.recv_exit_status() not in [0, 1]: 
@@ -157,12 +237,19 @@ class BackupThread(QThread):
                 
             local_archive_path = os.path.join(server_backup_dir, archive_name)
             
+            self.progress_signal.emit(0, "Инициализация загрузки...")
             logging.info(f"[{name}] Загрузка архива на локальный ПК...")
-            sftp = ssh_mgr.client.open_sftp()
-            sftp.get(remote_archive_path, local_archive_path, callback=lambda t, total: self.progress_signal.emit(int((t/total)*100) if total > 0 else 0))
             
+            max_speed = QSettings("GodAzrail", "SSHBackupManager").value("max_download_speed", 0, type=int)
+            sftp = ssh_mgr.client.open_sftp()
+            sftp_cb = create_sftp_callback(time.time(), max_speed, self.progress_signal)
+            
+            sftp.get(remote_archive_path, local_archive_path, callback=sftp_cb)
+            
+            self.progress_signal.emit(100, "Очистка сервера...")
             logging.info(f"[{name}] Очистка временных файлов на сервере...")
             sftp.remove(remote_archive_path)
+            ssh_mgr.client.exec_command("rm -rf /tmp/docker_dumps")
             sftp.close()
             
             db = DBManager()
@@ -190,8 +277,9 @@ class BackupThread(QThread):
             if ssh_mgr and ssh_mgr.client:
                 ssh_mgr.client.close()
 
+
 class RestoreThread(QThread):
-    progress_signal = pyqtSignal(int)
+    progress_signal = pyqtSignal(int, str)
     finished_signal = pyqtSignal(bool, str)
 
     def __init__(self, server_data, filepath):
@@ -208,21 +296,27 @@ class RestoreThread(QThread):
             password = decrypt_password(pwd_blob) if pwd_blob else None
             ssh_mgr = SSHManager(host, port, username, password, key_path)
             
+            self.progress_signal.emit(0, "Подключение для восстановления...")
             logging.info(f"[{name}] Подключение для восстановления...")
             ssh_mgr.connect()
             
             remote_archive_path = f"/tmp/restore_{int(time.time())}.tar.gz"
             
             logging.info(f"[{name}] Отправка бэкапа на сервер...")
+            max_speed = QSettings("GodAzrail", "SSHBackupManager").value("max_download_speed", 0, type=int)
             sftp = ssh_mgr.client.open_sftp()
-            sftp.put(self.filepath, remote_archive_path, callback=lambda t, total: self.progress_signal.emit(int((t/total)*100) if total > 0 else 0))
+            sftp_cb = create_sftp_callback(time.time(), max_speed, self.progress_signal)
+            
+            sftp.put(self.filepath, remote_archive_path, callback=sftp_cb)
             sftp.close()
             
+            self.progress_signal.emit(100, "Распаковка архива...")
             logging.info(f"[{name}] Распаковка архива в корень файловой системы (замена файлов)...")
             command = f"tar -xzpf {remote_archive_path} -C /"
             stdin, stdout, stderr = ssh_mgr.client.exec_command(command)
             exit_status = stdout.channel.recv_exit_status()
             
+            self.progress_signal.emit(100, "Очистка сервера...")
             logging.info(f"[{name}] Очистка временных файлов...")
             ssh_mgr.client.exec_command(f"rm -f {remote_archive_path}")
             

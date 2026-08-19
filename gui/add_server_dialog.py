@@ -115,7 +115,7 @@ class AddServerDialog(QDialog):
         key_file_layout = QHBoxLayout(key_file_page)
         key_file_layout.setContentsMargins(0, 0, 0, 0)
         self.key_file_input = QLineEdit()
-        self.key_file_input.setPlaceholderText("Путь к ключу (.pem, .key, .ppk)")
+        self.key_file_input.setPlaceholderText("Путь к ключу (.pem, .key, .ppk, .pub)")
         self.key_browse_btn = QPushButton("Обзор")
         self.key_browse_btn.setObjectName("BtnSecondary")
         self.key_browse_btn.clicked.connect(self.browse_key_file)
@@ -258,11 +258,41 @@ class AddServerDialog(QDialog):
             self.local_path_input.setText(path)
 
     def browse_key_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выберите файл ключа", "", "Key files (*.pem *.key *.ppk);;All files (*.*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Выберите файл ключа", "", "Key files (*.pem *.key *.ppk *.pub);;All files (*.*)")
         if path:
             self.key_file_input.setText(path)
 
+    def validate_key_input(self):
+        """Проверяет, не вставил ли пользователь публичный ключ вместо приватного"""
+        if self.radio_key.isChecked():
+            if self.key_type_combo.currentIndex() == 0:  # Режим файла
+                key_path = self.key_file_input.text().strip()
+                if key_path.lower().endswith('.pub'):
+                    QMessageBox.warning(self, "Ошибка SSH-ключа", 
+                                        "Вы выбрали публичный ключ (.pub).\n\n"
+                                        "Для подключения к серверу нужен ПРИВАТНЫЙ ключ (обычно это файл без расширения или .pem / .ppk). "
+                                        "Публичный ключ (.pub) должен находиться на самом сервере.")
+                    return False
+            else:  # Режим текста
+                key_text = self.key_text_input.toPlainText().strip()
+                if key_text.startswith("ssh-rsa") or key_text.startswith("ssh-ed25519") or key_text.startswith("ecdsa-"):
+                    QMessageBox.warning(self, "Ошибка SSH-ключа", 
+                                        "Вы вставили текст публичного ключа.\n\n"
+                                        "Для авторизации требуется ПРИВАТНЫЙ ключ. "
+                                        "Его текст выглядит как большой блок символов и обычно начинается со строк '-----BEGIN OPENSSH PRIVATE KEY-----'.")
+                    return False
+                if key_text and "PRIVATE KEY" not in key_text:
+                    QMessageBox.warning(self, "Подозрительный ключ", 
+                                        "Вставленный текст не похож на приватный ключ (отсутствует маркер PRIVATE KEY).\n\n"
+                                        "Убедитесь, что вы скопировали содержимое приватного ключа полностью, включая первую и последнюю строки с дефисами.")
+                    return False
+        return True
+
     def test_connection(self):
+        # ИЗМЕНЕНИЕ: Запускаем проверку перед тестом
+        if not self.validate_key_input():
+            return
+
         host, port, user = self.host_input.text(), self.port_input.text(), self.user_input.text()
         
         auth_type = 'password' if self.radio_pass.isChecked() else 'key'
@@ -290,6 +320,10 @@ class AddServerDialog(QDialog):
         else: QMessageBox.critical(self, "Ошибка", message)
 
     def save_server(self):
+        # ИЗМЕНЕНИЕ: Запускаем проверку перед сохранением
+        if not self.validate_key_input():
+            return
+
         name, host, port, user = self.name_input.text(), self.host_input.text(), self.port_input.text(), self.user_input.text()
         remote, local = self.remote_path_input.text(), self.local_path_input.text()
         auto = self.auto_backup_cb.isChecked()

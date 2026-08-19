@@ -6,10 +6,9 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QPushButton,
                              QFrame, QListWidget, QListWidgetItem,
                              QSystemTrayIcon, QMenu, QAction, qApp, QStyle, QStackedWidget, QTextEdit,
                              QSizePolicy)
-from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QPropertyAnimation, QEasingCurve, QRect, QPoint
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QEvent, QObject, QPropertyAnimation, QEasingCurve, QRect, QPoint, QTimer, QSettings
 from PyQt5.QtGui import QFont, QIcon
 
-# Импортируем нашу кастомную шапку и Toast
 from gui.title_bar import CustomTitleBar
 from gui.toast import Toast
 
@@ -17,11 +16,9 @@ from database.db_manager import DBManager
 from gui.server_panel import ServerPanel 
 from gui.history_window import HistoryView, FlowWidget 
 from gui.settings_dialog import SettingsView
-from core.backup_manager import BackupThread
+from core.backup_manager import BackupThread, global_signals
 from core.ssh_manager import SSHManager
 from utils.encryption import decrypt_password
-
-# Импортируем модули для обновления
 from core.updater import UpdateChecker, DownloadThread, apply_update
 
 STYLESHEET = """
@@ -79,7 +76,7 @@ class ServerCard(QFrame):
         self.main_window = main_window 
         self.server_data = server_data
         
-        self.setFixedSize(300, 140) 
+        self.setFixedSize(300, 160) # Увеличили высоту для текста скорости
         self.setStyleSheet("""
             QFrame { background-color: #1e2030; border-radius: 8px; border: 1px solid #292e42; }
             QFrame:hover { background-color: #24283b; border: 1px solid #3b4261; }
@@ -89,7 +86,6 @@ class ServerCard(QFrame):
         layout.setContentsMargins(15, 12, 15, 12)
         layout.setSpacing(6)
         
-        # --- Шапка: Аватар + Текст + Индикатор ---
         top_layout = QHBoxLayout()
         top_layout.setSpacing(12)
         
@@ -164,21 +160,24 @@ class ServerCard(QFrame):
         text_layout.addWidget(sub)
         text_layout.addWidget(schedule_label) 
         
-        # Индикатор вынесен в главный слой для позиционирования
         self.status_dot = QLabel()
         self.status_dot.setFixedSize(14, 14)
         self.set_dot_color("#565f89") 
         
         top_layout.addWidget(icon, alignment=Qt.AlignTop)
         top_layout.addLayout(text_layout)
-        top_layout.addStretch(1) # Пружина отталкивает индикатор вправо
+        top_layout.addStretch(1)
         top_layout.addWidget(self.status_dot, alignment=Qt.AlignTop | Qt.AlignRight)
         
         self.check_thread = StatusCheckThread(self.server_data)
         self.check_thread.status_signal.connect(self.update_network_status)
-        self.check_thread.start()
+        
+        self.net_timer = QTimer(self)
+        self.net_timer.timeout.connect(self.run_network_check)
+        interval_sec = QSettings("GodAzrail", "SSHBackupManager").value("check_interval", 60, type=int)
+        self.net_timer.start(interval_sec * 1000)
+        self.run_network_check()
 
-        # --- Подвал: Кнопки действий ---
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
         
@@ -201,7 +200,6 @@ class ServerCard(QFrame):
         """)
         self.history_btn.clicked.connect(lambda: history_cb(self.server_data))
         
-        # Иконка настроек (шестеренка)
         edit_btn = QPushButton()
         edit_btn.setCursor(Qt.PointingHandCursor)
         edit_btn.setFixedSize(28, 28)
@@ -229,6 +227,13 @@ class ServerCard(QFrame):
         btn_layout.addWidget(edit_btn)
         btn_layout.addWidget(del_btn)
         
+        # Текст статуса бэкапа и прогресс-бар
+        self.progress_text = QLabel("")
+        self.progress_text.setFont(QFont("Arial", 9))
+        self.progress_text.setStyleSheet("color: #a9b1d6; background: transparent; border: none;")
+        self.progress_text.setVisible(False)
+        self.progress_text.setAlignment(Qt.AlignCenter)
+
         self.progress = QProgressBar()
         self.progress.setFixedHeight(4)
         self.progress.setTextVisible(False)
@@ -238,7 +243,38 @@ class ServerCard(QFrame):
         layout.addLayout(top_layout)
         layout.addStretch()
         layout.addLayout(btn_layout)
+        layout.addWidget(self.progress_text)
         layout.addWidget(self.progress)
+        
+        global_signals.started.connect(self.on_global_start)
+        global_signals.progress.connect(self.on_global_progress)
+        global_signals.finished.connect(self.on_global_finish)
+
+    def run_network_check(self):
+        if not self.check_thread.isRunning():
+            self.check_thread.start()
+
+    def update_progress_ui(self, val, text):
+        self.progress.setValue(val)
+        self.progress_text.setText(text)
+
+    def on_global_start(self, srv_id):
+        if srv_id == self.server_data[0]:
+            self.backup_btn.setEnabled(False)
+            self.progress.setVisible(True)
+            self.progress_text.setVisible(True)
+            self.update_progress_ui(0, "Запуск авто-бэкапа...")
+
+    def on_global_progress(self, srv_id, val, text):
+        if srv_id == self.server_data[0]:
+            self.update_progress_ui(val, text)
+
+    def on_global_finish(self, srv_id, success, msg):
+        if srv_id == self.server_data[0]:
+            self.backup_btn.setEnabled(True)
+            self.progress.setVisible(False)
+            self.progress_text.setVisible(False)
+            self.progress_text.setText("")
 
     def set_dot_color(self, color):
         self.status_dot.setStyleSheet(f"""
@@ -261,24 +297,22 @@ class ServerCard(QFrame):
     def start_backup(self):
         self.backup_btn.setEnabled(False)
         self.progress.setVisible(True)
-        self.progress.setValue(0)
+        self.progress_text.setVisible(True)
+        self.update_progress_ui(0, "Запуск бэкапа...")
         
         self.thread = BackupThread(self.server_data)
-        self.thread.progress_signal.connect(self.progress.setValue)
-        
-        if hasattr(self.thread, 'time_signal'):
-            self.thread.time_signal.connect(self.backup_btn.setText)
-            
+        self.thread.progress_signal.connect(self.update_progress_ui)
         self.thread.finished_signal.connect(self.on_finish)
         self.thread.start()
 
     def on_finish(self, success, msg):
         self.backup_btn.setEnabled(True)
-        self.backup_btn.setText("Бэкап")
         self.progress.setVisible(False)
+        self.progress_text.setVisible(False)
         self.progress.setValue(0)
-        
+        self.progress_text.setText("")
         Toast(self.main_window, msg, is_error=not success)
+
 
 class MainWindow(QMainWindow):
     def __init__(self, scheduler):
@@ -381,7 +415,7 @@ class MainWindow(QMainWindow):
         self.btn_logs.clicked.connect(self.open_logs_page)
         sidebar_layout.addWidget(self.btn_logs)
         
-        self.current_version = "v1.0.3" 
+        self.current_version = "v1.0.4" 
         version_label = QLabel(self.current_version)
         version_label.setAlignment(Qt.AlignCenter)
         version_label.setStyleSheet("QLabel { color: #565f89; font-size: 11px; background: transparent; border: none; padding: 10px; }")
@@ -398,7 +432,6 @@ class MainWindow(QMainWindow):
         self.title_bar = CustomTitleBar(self)
         right_side_layout.addWidget(self.title_bar)
         
-        # Интеграция кнопки обновления с шапкой
         self.update_btn = self.title_bar.update_btn
         self.update_btn.clicked.connect(self.start_update_download)
 
@@ -500,6 +533,10 @@ class MainWindow(QMainWindow):
         self.load_servers()
         self.check_for_updates() 
 
+    def update_network_timers(self, new_interval):
+        for card in self.flow_widget.findChildren(ServerCard):
+            card.net_timer.setInterval(new_interval * 1000)
+
     def check_for_updates(self):
         self.checker = UpdateChecker(current_version=self.current_version, owner="GodAzrail", repo="SSH-Backup-Manager")
         self.checker.update_available.connect(self.on_update_found)
@@ -568,10 +605,8 @@ class MainWindow(QMainWindow):
                 if y > self.height() - border: return True, 15 
                 
                 if 0 < y < 40 and 240 < x < self.width() - 240:
-                    # Исключаем зону кнопки обновления из зоны перетаскивания окна
                     if self.update_btn.isVisible():
                         btn_pos = self.update_btn.mapTo(self, QPoint(0, 0))
-                        # Если курсор мыши находится в границах кнопки по оси X
                         if btn_pos.x() <= x <= btn_pos.x() + self.update_btn.width():
                             return super().nativeEvent(eventType, message)
                             
